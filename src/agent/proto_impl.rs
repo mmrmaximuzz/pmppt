@@ -145,8 +145,8 @@ pub mod selfhosted {
                         }
                     },
 
-                    // when local requests are over, implicitly generate Finish request
-                    None => break Request::Finish,
+                    // when local requests are over, implicitly generate FinishAll request
+                    None => break Request::FinishAll,
                 }
             }
             .into();
@@ -169,7 +169,7 @@ pub mod selfhosted {
                     self.requests.push(SelfHostedRequest::Abort);
                 }
                 Response::Poll(Ok(id)) => {
-                    debug!("Poll result: id={}", id);
+                    debug!("Poll result: id={id}");
                 }
 
                 Response::SpawnFg(Err(msg)) => {
@@ -195,7 +195,7 @@ pub mod selfhosted {
                     self.requests.push(SelfHostedRequest::Abort);
                 }
                 Response::SpawnBg(Ok(id)) => {
-                    debug!("BG spawn result: id={}", id);
+                    debug!("BG spawn result: id={id}");
                 }
             }
 

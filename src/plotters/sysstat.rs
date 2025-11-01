@@ -113,7 +113,7 @@ pub mod mpstat {
     fn initialize_column_map(chunks: &[&str]) -> Res<Vec<Option<MpstatColumn>>> {
         let first = chunks[0];
         let col_line = first
-            .split("\n")
+            .lines()
             .next()
             .ok_or("failed to get mpstat columns line from first chunk")?;
 
@@ -156,7 +156,7 @@ pub mod mpstat {
         };
 
         for chunk in chunks {
-            let mut lines = chunk.split("\n");
+            let mut lines = chunk.lines();
             let _ = lines.next().ok_or("failed to skip mpstat column line")?;
             let _ = lines.next().ok_or("failed to skip mpstat all CPU line")?;
 
@@ -283,7 +283,7 @@ pub mod mpstat {
 }
 
 pub mod iostat {
-    use std::str::FromStr;
+    use std::collections::{HashMap, HashSet};
 
     use chrono::NaiveDateTime;
 
@@ -291,23 +291,106 @@ pub mod iostat {
 
     use super::{split_chunks_iostat, split_header};
 
-    pub struct Iostat {}
+    enum IostatCol {
+        ReadRate,
+        ReadRateMBytes,
+        ReadAvgSize,
+        WriteRate,
+        WriteRateMBytes,
+        WriteAvgSize,
+        QueueAvgLength,
+        Utilization,
+    }
+
+    impl IostatCol {
+        fn from_str(s: &str) -> Option<Self> {
+            match s {
+                "r/s" => Self::ReadRate,
+                "rMB/s" => Self::ReadRateMBytes,
+                "rareq-sz" => Self::ReadAvgSize,
+                "w/s" => Self::WriteRate,
+                "wMB/s" => Self::WriteRateMBytes,
+                "wareq-sz" => Self::WriteAvgSize,
+                "aqu-sz" => Self::QueueAvgLength,
+                "%util" => Self::Utilization,
+                _ => return None,
+            }
+            .into()
+        }
+    }
+
+    #[derive(Default, Debug)]
+    pub struct Iostat {
+        pub times: Vec<String>,
+        pub disks: HashSet<String>,
+        pub stats: HashMap<String, Vec<f64>>,
+    }
 
     pub fn parse(content: &str) -> Res<Iostat> {
-        let (_, content) = split_header(content)?;
-        for chunk in split_chunks_iostat(content)? {
+        let mut iostat = Iostat::default();
+
+        let (_, content) = split_header(content)?; // we dont need iostat header
+        let chunks = split_chunks_iostat(content)?;
+
+        // parse the column types
+        let columns: Vec<_> = {
+            let fstchunk = chunks[0];
+            fstchunk
+                .lines()
+                .nth(1)
+                .ok_or_else(|| format!("bad first chunk: {fstchunk}"))?
+                .split_ascii_whitespace()
+                .skip(1) // skip the first column as it is device name
+                .map(IostatCol::from_str)
+                .collect()
+        };
+
+        for chunk in chunks {
             let (time, lines) = chunk
                 .split_once('\n')
                 .ok_or_else(|| format!("bad chunk {chunk}"))?;
             let tstamp = NaiveDateTime::parse_from_str(time, "%m/%d/%Y %I:%M:%S %p")
                 .map_err(|e| format!("failed to parse time {time}: {e}"))?;
+            iostat.times.push(tstamp.to_string());
 
-            for line in lines.split('\n') {}
+            // skip the first line (it is header that we already parsed)
+            for line in lines.lines().skip(1) {
+                let mut items = line.split_ascii_whitespace();
 
-            println!("{tstamp}");
-            break;
+                // explicitly extract the disk name
+                let disk = items
+                    .next()
+                    .ok_or_else(|| format!("bad iostat line: {line}"))?;
+
+                iostat.disks.insert(disk.to_string());
+
+                // then extract items
+                for (item, item_type) in items.zip(columns.iter()) {
+                    let value = item
+                        .parse::<f64>()
+                        .map_err(|e| format!("bad read rate {item}: {e}"))?;
+                    let label = match item_type {
+                        Some(IostatCol::ReadRate) => format!("{disk}_riops"),
+                        Some(IostatCol::ReadRateMBytes) => format!("{disk}_rMBs"),
+                        Some(IostatCol::ReadAvgSize) => format!("{disk}_rsize"),
+                        Some(IostatCol::WriteRate) => format!("{disk}_wiops"),
+                        Some(IostatCol::WriteRateMBytes) => format!("{disk}_wMBs"),
+                        Some(IostatCol::WriteAvgSize) => format!("{disk}_wsize"),
+                        Some(IostatCol::QueueAvgLength) => format!("{disk}_qlen"),
+                        Some(IostatCol::Utilization) => format!("{disk}_util"),
+                        None => continue,
+                    };
+
+                    match iostat.stats.get_mut(&label) {
+                        Some(v) => v.push(value),
+                        None => {
+                            iostat.stats.insert(label, vec![value]);
+                        }
+                    };
+                }
+            }
         }
-        Ok(Iostat {})
+        Ok(iostat)
     }
 }
 

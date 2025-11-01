@@ -182,8 +182,57 @@ fn plot_net_dev(net_dev: NetDev) -> Plot {
     plot
 }
 
-fn plot_iostat(_iostat: Iostat) -> Plot {
-    let plot = Plot::new();
+fn plot_iostat(iostat: Iostat) -> Plot {
+    let mut plot = Plot::new();
+    let params = [
+        ("riops", "x", "y"),
+        ("wiops", "x2", "y2"),
+        ("rMBs", "x3", "y3"),
+        ("wMBs", "x4", "y4"),
+        ("rsize", "x5", "y5"),
+        ("wsize", "x6", "y6"),
+        ("qlen", "x7", "y7"),
+        ("util", "x8", "y8"),
+    ];
+
+    let mut disks: Vec<_> = iostat.disks.iter().collect();
+    disks.sort();
+
+    for (suffix, x, y) in params {
+        for disk in &disks {
+            let label = format!("{disk}_{suffix}");
+            let values = iostat.stats.get(&label).unwrap(); // must be present
+            plot.add_trace(
+                Scatter::new(iostat.times.clone(), values.clone())
+                    .name(label)
+                    .x_axis(x)
+                    .y_axis(y),
+            );
+        }
+    }
+
+    plot.set_layout(
+        Layout::new()
+            .grid(
+                LayoutGrid::new()
+                    .rows(4)
+                    .columns(2)
+                    .pattern(GridPattern::Independent),
+            )
+            .title("iostat data")
+            .y_axis(Axis::new().title("Read rate [IOPS]"))
+            .y_axis2(Axis::new().title("Write rate [IOPS]"))
+            .y_axis3(Axis::new().title("Read speed [MB/s]"))
+            .y_axis4(Axis::new().title("Write speed [MB/s]"))
+            .y_axis5(Axis::new().title("Read avg size [?]"))
+            .y_axis6(Axis::new().title("Write avg size [?]"))
+            .y_axis7(Axis::new().title("Queue length"))
+            .y_axis8(Axis::new().title("Util [%]"))
+            .width(1900)
+            .height(950)
+            .auto_size(true),
+    );
+
     plot
 }
 

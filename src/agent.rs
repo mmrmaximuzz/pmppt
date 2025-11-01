@@ -30,7 +30,7 @@ use std::{
 use log::{error, info, warn};
 use subprocess::{Exec, Popen};
 
-use crate::common::communication::{IdOrError, OutOrError, Request, Response, SpawnMode};
+use crate::common::communication::{Id, IdOrError, OutOrError, Request, Response, SpawnMode};
 
 /// Generic transport protocol interface.
 pub trait AgentOps {
@@ -59,8 +59,8 @@ pub struct Agent<P: AgentOps> {
     proto: P,
     count: u32,
     outdir: PathBuf,
-    polls: HashMap<u32, Poll>,
-    procs: HashMap<u32, Proc>,
+    polls: HashMap<Id, Poll>,
+    procs: HashMap<Id, Proc>,
 }
 
 impl<P> Agent<P>
@@ -90,7 +90,7 @@ where
                     warn!("got 'abort' request, emergency stop");
                     break true;
                 }
-                Some(Request::Finish) => {
+                Some(Request::FinishAll) => {
                     info!("got 'finish' request, stopping running activities");
                     break false;
                 }
@@ -102,14 +102,14 @@ where
         self.stop(is_abnormal);
     }
 
-    fn get_next_id(&mut self) -> u32 {
+    fn get_next_id(&mut self) -> Id {
         self.count += 1;
-        self.count
+        Id::from_u32(self.count)
     }
 
     fn spawn_poller(&mut self, paths: &[PathBuf], name: &str) -> IdOrError {
         let id = self.get_next_id();
-        let path_out = self.outdir.join(format!("{:03}-poll.log", id));
+        let path_out = self.outdir.join(format!("{id}-poll.log"));
         let paths = paths.to_owned(); // full clone to send to thread
 
         let stop_flag_agent = Arc::new(AtomicBool::default());
@@ -125,9 +125,9 @@ where
                 name: name.to_owned(),
             },
         );
-        assert!(res.is_none(), "got duplicate poll/proc on {}", id);
+        assert!(res.is_none(), "got duplicate poll/proc on {id}");
 
-        info!("Poller:   id={}, path='{}'", id, name);
+        info!("Poller:   id={id}, path='{name}'");
 
         // TODO: add checks for failures in poller spawning
         Ok(id)
@@ -135,8 +135,8 @@ where
 
     fn spawn_process_foreground(&mut self, cmd: String, args: Vec<String>) -> OutOrError {
         let id = self.get_next_id();
-        let outpath = self.outdir.join(format!("{:03}-out.log", id));
-        let errpath = self.outdir.join(format!("{:03}-err.log", id));
+        let outpath = self.outdir.join(format!("{id}-out.log"));
+        let errpath = self.outdir.join(format!("{id}-err.log"));
         let file_out = File::create_new(outpath.clone()).unwrap();
         let file_err = File::create_new(errpath.clone()).unwrap();
 
@@ -148,15 +148,15 @@ where
         // collect the name before spawning the process
         let name = cmd.to_cmdline_lossy();
 
-        info!("FG spawn: id={}, name='{}'", id, name);
+        info!("FG spawn: id={id}, name='{name}'");
 
         let status = cmd.join().map_err(|e| {
-            let msg = format!("failed to spawn fg process: {}", e);
-            error!("{}", msg);
+            let msg = format!("failed to spawn fg process: {e}");
+            error!("{msg}");
             msg
         })?;
 
-        info!("FG spawn: id={}, name='{}', success={:?}", id, name, status);
+        info!("FG spawn: id={id}, name='{name}', success={status:?}");
 
         // collect the results
         let mut stdout = Vec::with_capacity(4096);
@@ -180,8 +180,8 @@ where
         wait4: bool,
     ) -> IdOrError {
         let id = self.get_next_id();
-        let file_out = File::create_new(self.outdir.join(format!("{:03}-out.log", id))).unwrap();
-        let file_err = File::create_new(self.outdir.join(format!("{:03}-err.log", id))).unwrap();
+        let file_out = File::create_new(self.outdir.join(format!("{id}-out.log"))).unwrap();
+        let file_err = File::create_new(self.outdir.join(format!("{id}-err.log"))).unwrap();
 
         let cmd = Exec::cmd(&cmd)
             .args(&args)
@@ -190,8 +190,8 @@ where
 
         let name = cmd.to_cmdline_lossy();
         let popen = cmd.popen().map_err(|e| {
-            let msg = format!("failed to spawn bg process: {}", e);
-            error!("{}", msg);
+            let msg = format!("failed to spawn bg process: {e}");
+            error!("{msg}");
             msg
         })?;
 
@@ -203,9 +203,9 @@ where
                 name: name.clone(),
             },
         );
-        assert!(res.is_none(), "got duplicate poll/proc on {}", id);
+        assert!(res.is_none(), "got duplicate poll/proc on {id}");
 
-        info!("BG spawn: id={}, name='{}', wait4={}", id, name, wait4);
+        info!("BG spawn: id={id}, name='{name}', wait4={wait4}");
 
         Ok(id)
     }
@@ -240,8 +240,8 @@ where
                 let res = if !paths.is_empty() {
                     self.spawn_poller(&paths, &pattern)
                 } else {
-                    let msg = format!("got empty search result on expanding '{}'", pattern);
-                    error!("{}", msg);
+                    let msg = format!("got empty search result on expanding '{pattern}'");
+                    error!("{msg}");
                     Err(msg)
                 };
 
@@ -251,45 +251,45 @@ where
                 let res = self.spawn_process(cmd, args, mode);
                 self.proto.send_response(res);
             }
-            Request::Finish => unreachable!("Finish must be already processed outside"),
+            Request::FinishAll => unreachable!("FinishAll must be already processed outside"),
             Request::Abort => unreachable!("Abort must be already processed outside"),
         }
     }
 
     fn stop(mut self, abnormal: bool) {
         let mode = if abnormal { "emergency" } else { "graceful" };
-        info!("stopping agent in {} mode", mode);
+        info!("stopping agent in {mode} mode");
 
         // stop in reverse order
-        for i in (1..=self.count).rev() {
-            match (self.procs.remove(&i), self.polls.remove(&i)) {
+        for id in (1..=self.count).rev().map(Id::from_u32) {
+            match (self.procs.remove(&id), self.polls.remove(&id)) {
                 (Some(mut proc), None) => {
-                    info!("stopping process id={}, name='{}'", i, proc.name);
+                    info!("stopping process id={id}, name='{}'", proc.name);
                     if !proc.wait4 || abnormal {
                         // send the signal to terminate it now
                         proc.popen
                             .terminate()
-                            .unwrap_or_else(|_| panic!("failed to terminate process {}", i));
+                            .unwrap_or_else(|_| panic!("failed to terminate process {id}"));
                     }
 
                     proc.popen
                         .wait()
-                        .unwrap_or_else(|_| panic!("failed to wait for the process {}", i));
+                        .unwrap_or_else(|_| panic!("failed to wait for the process {id}"));
                 }
 
                 (None, Some(poll)) => {
-                    info!("stopping poller  id={}, name='{}'", i, poll.name);
+                    info!("stopping poller  id={id}, name='{}'", poll.name);
                     poll.stop.store(true, Ordering::Release);
                     poll.thrd
                         .join()
-                        .unwrap_or_else(|_| panic!("cannot join polling thread: {}", i));
+                        .unwrap_or_else(|_| panic!("cannot join polling thread: {id}"));
                 }
 
                 // OK, it was FG process or it has been stopped already by the pmppt client
                 (None, None) => (),
 
                 // this should never happen
-                _ => unreachable!("found both process and poller for id={}", i),
+                _ => unreachable!("found both process and poller for id={id}"),
             }
         }
 

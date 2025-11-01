@@ -73,7 +73,7 @@ fn main_selfhosted(args: &[String]) -> Res<()> {
     let logs_path = PathBuf::from(&args[1]);
     let outdir = create_outdir(&logs_path)?;
 
-    info!("agent is in selfhosted mode with config: {}", json_path);
+    info!("agent is in selfhosted mode with config: {json_path}");
     info!("output directory: {}", outdir.to_string_lossy());
     let proto = selfhosted::SelfHostedProtocol::from_json(json_path)?;
     let agent = agent::Agent::new(proto, outdir.clone());
@@ -104,7 +104,7 @@ fn main() {
     // TODO: here will be better CLI arguments parsing
     let args: Vec<String> = std::env::args().collect();
     if let Err(msg) = main_wrapper(&args) {
-        error!("Error: {}", msg);
+        error!("Error: {msg}");
         std::process::exit(1);
     }
 }
