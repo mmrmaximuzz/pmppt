@@ -251,6 +251,7 @@ where
                 let res = self.spawn_process(cmd, args, mode);
                 self.proto.send_response(res);
             }
+            Request::Finish { id } => self.finish_task(id),
             Request::FinishAll => unreachable!("FinishAll must be already processed outside"),
             Request::Abort => unreachable!("Abort must be already processed outside"),
         }
@@ -263,32 +264,10 @@ where
         // stop in reverse order
         for id in (1..=self.count).rev().map(Id::from_u32) {
             match (self.procs.remove(&id), self.polls.remove(&id)) {
-                (Some(mut proc), None) => {
-                    info!("stopping process id={id}, name='{}'", proc.name);
-                    if !proc.wait4 || abnormal {
-                        // send the signal to terminate it now
-                        proc.popen
-                            .terminate()
-                            .unwrap_or_else(|_| panic!("failed to terminate process {id}"));
-                    }
-
-                    proc.popen
-                        .wait()
-                        .unwrap_or_else(|_| panic!("failed to wait for the process {id}"));
-                }
-
-                (None, Some(poll)) => {
-                    info!("stopping poller  id={id}, name='{}'", poll.name);
-                    poll.stop.store(true, Ordering::Release);
-                    poll.thrd
-                        .join()
-                        .unwrap_or_else(|_| panic!("cannot join polling thread: {id}"));
-                }
-
-                // OK, it was FG process or it has been stopped already by the pmppt client
+                (Some(proc), None) => stop_process(id, proc, abnormal),
+                (None, Some(poll)) => stop_poller(id, poll),
+                // OK, it was FG process or it has been stopped already by the pmppt controller
                 (None, None) => (),
-
-                // this should never happen
                 _ => unreachable!("found both process and poller for id={id}"),
             }
         }
@@ -297,4 +276,38 @@ where
         assert!(self.polls.is_empty());
         assert!(self.procs.is_empty());
     }
+
+    fn finish_task(&mut self, id: Id) {
+        match (self.procs.remove(&id), self.polls.remove(&id)) {
+            (Some(proc), None) => stop_process(id, proc, false),
+            (None, Some(poll)) => stop_poller(id, poll),
+            (None, None) => {
+                self.proto
+                    .send_response(Response::Finish(Err(format!("activity {id} not found"))));
+            }
+            _ => unreachable!("found both process and poller for id={id}"),
+        }
+    }
+}
+
+fn stop_poller(id: Id, poll: Poll) {
+    info!("stopping poller  id={id}, name='{}'", poll.name);
+    poll.stop.store(true, Ordering::Release);
+    poll.thrd
+        .join()
+        .unwrap_or_else(|_| panic!("cannot join polling thread: {id}"));
+}
+
+fn stop_process(id: Id, mut proc: Proc, force: bool) {
+    info!("stopping process id={id}, name='{}'", proc.name);
+    if !proc.wait4 || force {
+        // send the signal to terminate it now
+        proc.popen
+            .terminate()
+            .unwrap_or_else(|_| panic!("failed to terminate process {id}"));
+    }
+
+    proc.popen
+        .wait()
+        .unwrap_or_else(|_| panic!("failed to wait for the process {id}"));
 }

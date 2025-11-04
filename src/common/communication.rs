@@ -27,6 +27,9 @@ pub enum Request {
         args: Vec<String>,
         mode: SpawnMode,
     },
+    Finish {
+        id: Id,
+    },
     FinishAll,
     Abort,
 }
@@ -60,6 +63,7 @@ pub enum Response {
     Poll(IdOrError),
     SpawnFg(OutOrError),
     SpawnBg(IdOrError),
+    Finish(IdOrError),
 }
 
 pub trait PmpptSerializer {

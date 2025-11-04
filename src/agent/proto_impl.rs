@@ -27,7 +27,7 @@ pub mod selfhosted {
     use serde_json::Value;
 
     use crate::agent::AgentOps;
-    use crate::common::communication::{Request, Response, SpawnMode};
+    use crate::common::communication::{Id, Request, Response, SpawnMode};
 
     #[derive(Deserialize)]
     enum ExecMode {
@@ -61,6 +61,9 @@ pub mod selfhosted {
             cmd: String,
             args: Option<Vec<String>>,
             mode: Option<ExecMode>,
+        },
+        Finish {
+            id: u32,
         },
         Abort,
         // local transport commands (non-PMPPT)
@@ -99,6 +102,11 @@ pub mod selfhosted {
                 current: None,
             })
         }
+
+        /// emulate the Abort message from the controller
+        fn initiate_abort(&mut self) {
+            self.requests.push(SelfHostedRequest::Abort);
+        }
     }
 
     const CLI_PROMPT: &str = r#"
@@ -125,6 +133,11 @@ pub mod selfhosted {
                                 cmd,
                                 args: args.unwrap_or_default(), // default is no args
                                 mode: selfhosted_mode_to_agent(mode), // default is foreground
+                            };
+                        }
+                        SelfHostedRequest::Finish { id } => {
+                            break Request::Finish {
+                                id: Id::from_u32(id),
                             };
                         }
                         SelfHostedRequest::Abort => break Request::Abort,
@@ -164,9 +177,7 @@ pub mod selfhosted {
                         r#"Poll request failed: req={:?}, error="{}""#,
                         self.current, msg
                     );
-
-                    // emulate the Abort message from the controller
-                    self.requests.push(SelfHostedRequest::Abort);
+                    self.initiate_abort();
                 }
                 Response::Poll(Ok(id)) => {
                     debug!("Poll result: id={id}");
@@ -177,9 +188,7 @@ pub mod selfhosted {
                         r#"FG spawn failed: req={:?}, error="{}""#,
                         self.current, msg
                     );
-
-                    // emulate the Abort message from the controller
-                    self.requests.push(SelfHostedRequest::Abort);
+                    self.initiate_abort();
                 }
                 Response::SpawnFg(Ok(_)) => {
                     // no need for FG spawn result in local mode
@@ -196,6 +205,14 @@ pub mod selfhosted {
                 }
                 Response::SpawnBg(Ok(id)) => {
                     debug!("BG spawn result: id={id}");
+                }
+
+                Response::Finish(Ok(id)) => {
+                    debug!("Finished activity with id={id}");
+                }
+                Response::Finish(Err(msg)) => {
+                    error!(r#"Activity finish failed: error="{msg}""#);
+                    self.initiate_abort();
                 }
             }
 
