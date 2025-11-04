@@ -46,15 +46,21 @@ pub struct Id(u32);
 pub type IdOrError = Result<Id, String>;
 pub type OutOrError = Result<(Vec<u8>, Vec<u8>), String>;
 
-impl Id {
-    pub fn from_u32(id: u32) -> Self {
-        Self(id)
+impl From<u32> for Id {
+    fn from(value: u32) -> Self {
+        Self(value)
+    }
+}
+
+impl From<Id> for u32 {
+    fn from(value: Id) -> Self {
+        value.0
     }
 }
 
 impl Display for Id {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        f.pad_integral(true, "", &format!("{}", self.0))
     }
 }
 

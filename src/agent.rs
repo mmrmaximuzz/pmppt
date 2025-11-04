@@ -104,12 +104,12 @@ where
 
     fn get_next_id(&mut self) -> Id {
         self.count += 1;
-        Id::from_u32(self.count)
+        Id::from(self.count)
     }
 
     fn spawn_poller(&mut self, paths: &[PathBuf], name: &str) -> IdOrError {
         let id = self.get_next_id();
-        let path_out = self.outdir.join(format!("{id}-poll.log"));
+        let path_out = self.outdir.join(format!("{id:03}-poll.log"));
         let paths = paths.to_owned(); // full clone to send to thread
 
         let stop_flag_agent = Arc::new(AtomicBool::default());
@@ -135,8 +135,8 @@ where
 
     fn spawn_process_foreground(&mut self, cmd: String, args: Vec<String>) -> OutOrError {
         let id = self.get_next_id();
-        let outpath = self.outdir.join(format!("{id}-out.log"));
-        let errpath = self.outdir.join(format!("{id}-err.log"));
+        let outpath = self.outdir.join(format!("{id:03}-out.log"));
+        let errpath = self.outdir.join(format!("{id:03}-err.log"));
         let file_out = File::create_new(outpath.clone()).unwrap();
         let file_err = File::create_new(errpath.clone()).unwrap();
 
@@ -180,8 +180,8 @@ where
         wait4: bool,
     ) -> IdOrError {
         let id = self.get_next_id();
-        let file_out = File::create_new(self.outdir.join(format!("{id}-out.log"))).unwrap();
-        let file_err = File::create_new(self.outdir.join(format!("{id}-err.log"))).unwrap();
+        let file_out = File::create_new(self.outdir.join(format!("{id:03}-out.log"))).unwrap();
+        let file_err = File::create_new(self.outdir.join(format!("{id:03}-err.log"))).unwrap();
 
         let cmd = Exec::cmd(&cmd)
             .args(&args)
@@ -262,7 +262,7 @@ where
         info!("stopping agent in {mode} mode");
 
         // stop in reverse order
-        for id in (1..=self.count).rev().map(Id::from_u32) {
+        for id in (1..=self.count).rev().map(Id::from) {
             match (self.procs.remove(&id), self.polls.remove(&id)) {
                 (Some(proc), None) => stop_process(id, proc, abnormal),
                 (None, Some(poll)) => stop_poller(id, poll),

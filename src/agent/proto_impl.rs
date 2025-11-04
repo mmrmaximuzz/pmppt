@@ -16,7 +16,7 @@
 
 //! Implementations of PMPPT protocol for the agent side.
 
-//! Implementation of the local protocol (based on explicit static JSON files)
+/// Implementation of the local protocol (based on explicit static JSON files)
 pub mod selfhosted {
     use std::fs;
     use std::io::Read;
@@ -136,9 +136,7 @@ pub mod selfhosted {
                             };
                         }
                         SelfHostedRequest::Finish { id } => {
-                            break Request::Finish {
-                                id: Id::from_u32(id),
-                            };
+                            break Request::Finish { id: Id::from(id) };
                         }
                         SelfHostedRequest::Abort => break Request::Abort,
 
@@ -199,9 +197,7 @@ pub mod selfhosted {
                         r#"BG spawn failed: req={:?}, error="{}""#,
                         self.current, msg
                     );
-
-                    // emulate the Abort message from the controller
-                    self.requests.push(SelfHostedRequest::Abort);
+                    self.initiate_abort();
                 }
                 Response::SpawnBg(Ok(id)) => {
                     debug!("BG spawn result: id={id}");
@@ -218,6 +214,54 @@ pub mod selfhosted {
 
             // in local mode this function cannot fail
             Some(())
+        }
+    }
+}
+
+/// Implementation of the remote protocol based on MsgPack
+pub mod tcpmsgpack {
+    use std::{io::{Read, Write}, net::TcpStream};
+
+    use rmp_serde::Serializer;
+    use serde::Serialize;
+
+    use crate::{
+        agent::AgentOps,
+        common::{communication, msgpack_impl},
+    };
+
+    pub struct TcpMsgpackProtocol {
+        conn: TcpStream,
+    }
+
+    impl TcpMsgpackProtocol {
+        pub fn from_conn(conn: TcpStream) -> TcpMsgpackProtocol {
+            TcpMsgpackProtocol { conn }
+        }
+    }
+
+    impl AgentOps for TcpMsgpackProtocol {
+        fn recv_request(&mut self) -> Option<communication::Request> {
+            let mut msg_size = [0u8; 4];
+            self.conn.read_exact(&mut msg_size).ok()?;
+            let msg_size = u32::from_le_bytes(msg_size);
+
+            let mut msg = vec![0u8; msg_size as usize];
+            self.conn.read_exact(&mut msg).ok()?;
+
+            let msg = rmp_serde::from_slice::<msgpack_impl::Request>(&msg).ok()?;
+            Some(communication::Request::from(msg))
+        }
+
+        fn send_response(&mut self, response: communication::Response) -> Option<()> {
+            let mut msg_buf = vec![];
+            let msg = msgpack_impl::Response::from(response);
+            msg.serialize(&mut Serializer::new(&mut msg_buf)).unwrap();
+
+            let msg_size = msg_buf.len().to_le_bytes();
+
+            self.conn.write_all(&msg_size).ok()?;
+            self.conn.write_all(&msg_buf).ok()
         }
     }
 }
