@@ -100,7 +100,7 @@ where
         };
 
         // stop itself before Drop
-        self.stop_all(is_abnormal);
+        self.stop_all(is_abnormal, false);
     }
 
     fn get_next_id(&mut self) -> Id {
@@ -253,14 +253,14 @@ where
                 self.proto.send_response(res);
             }
             Request::Stop { id } => self.stop_task(id),
-            Request::StopAll => self.stop_all(false),
+            Request::StopAll => self.stop_all(false, true),
             Request::Collect => self.collect_data(),
             Request::End => unreachable!("End must be already processed outside"),
             Request::Abort => unreachable!("Abort must be already processed outside"),
         }
     }
 
-    fn stop_all(&mut self, abnormal: bool) {
+    fn stop_all(&mut self, abnormal: bool, from_stopall: bool) {
         let mode = if abnormal { "emergency" } else { "graceful" };
         info!("stopping agent in {mode} mode");
 
@@ -278,6 +278,10 @@ where
         // sanity checks
         assert!(self.polls.is_empty());
         assert!(self.procs.is_empty());
+
+        if from_stopall {
+            self.proto.send_response(Response::StopAll(Ok(())));
+        }
     }
 
     fn stop_task(&mut self, id: Id) {

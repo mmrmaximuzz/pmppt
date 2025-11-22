@@ -16,16 +16,36 @@
 
 //! Just some test program to implement the trait methods, not a useful executable
 
-use std::{env, fs::File, io::Write, thread::sleep, time::Duration};
+use std::{
+    env,
+    fs::File,
+    io::{Read, Write},
+};
 
 use pmppt::{
     common::{
         Res,
-        communication::{Request, Response},
+        communication::{Id, Request, Response},
         emsg,
     },
     controller::connection::{ConnectionOps, tcpmsgpack},
 };
+
+fn poll<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Id> {
+    conn.send(Request::Poll {
+        pattern: pattern.to_string(),
+    })
+    .map_err(|e| format!("failed to send Poll for {pattern}: {e}"))?;
+
+    let recv = conn
+        .recv()
+        .map_err(|e| format!("failed to recv Poll response for {pattern}: {e}"))?;
+    match recv {
+        Response::Poll(Ok(id)) => Ok(id),
+        Response::Poll(Err(e)) => Err(format!("failed to launch Poll for {pattern}: {e}")),
+        _ => unreachable!("bad answer for Poll request {recv:?}"),
+    }
+}
 
 fn main_wrapper() -> Res<()> {
     let args: Vec<String> = env::args().collect();
@@ -36,22 +56,19 @@ fn main_wrapper() -> Res<()> {
     let endpoint = &args[1];
     let mut conn = tcpmsgpack::TcpMsgpackConnection::from_endpoint(endpoint)?;
 
-    conn.send(Request::Poll {
-        pattern: "/proc/diskstats".to_string(),
-    })
-    .map_err(|e| format!("failed to send poll request: {e}"))?;
-    let recv = conn
-        .recv()
-        .map_err(|e| format!("failed to recv poll response: {e}"))?;
-    let id = match recv {
-        Response::Poll(Ok(id)) => id,
-        Response::Poll(Err(e)) => return emsg(&format!("failed to spawn poll: {e}")),
-        _ => unreachable!("bad protocol response for Poll request from agent"),
-    };
+    println!("Starting the pollers");
+    poll(&mut conn, "/proc/stat")?;
+    poll(&mut conn, "/proc/meminfo")?;
+    poll(&mut conn, "/proc/net/dev")?;
+    poll(&mut conn, "/proc/diskstats")?;
 
-    sleep(Duration::from_secs(3));
+    println!("Press any key to stop collection");
+    std::io::stdin()
+        .read_exact(&mut [0u8])
+        .expect("stdin is broken");
 
-    conn.send(Request::Stop { id })
+    println!("Stopping collection");
+    conn.send(Request::StopAll)
         .map_err(|e| format!("failed to send Stop request: {e}"))?;
     let recv = conn
         .recv()
@@ -62,6 +79,7 @@ fn main_wrapper() -> Res<()> {
         _ => unreachable!("bad protocol response for Stop request from agent"),
     };
 
+    println!("Collecting data");
     conn.send(Request::Collect)
         .map_err(|e| format!("failed to send Collect request: {e}"))?;
     let recv = conn
@@ -73,12 +91,14 @@ fn main_wrapper() -> Res<()> {
         _ => unreachable!("bad protocol response for Collect request from agent"),
     };
 
+    println!("Writing archive");
     File::create_new("archive.tgz")
         .unwrap()
         .write_all(&data)
         .unwrap();
     drop(data);
 
+    println!("Terminating session");
     conn.send(Request::End)
         .map_err(|e| format!("failed to send End request: {e}"))?;
     conn.close();
