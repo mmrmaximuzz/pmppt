@@ -17,6 +17,7 @@
 pub mod poller;
 pub mod proto_impl;
 
+use std::ffi::OsStr;
 use std::io::Read;
 use std::sync::atomic::Ordering;
 use std::{
@@ -90,8 +91,8 @@ where
                     warn!("got 'abort' request, emergency stop");
                     break true;
                 }
-                Some(Request::FinishAll) => {
-                    info!("got 'finish' request, stopping running activities");
+                Some(Request::End) => {
+                    info!("got 'end' request, stopping running activities");
                     break false;
                 }
                 Some(msg) => self.handle_message(msg),
@@ -99,7 +100,7 @@ where
         };
 
         // stop itself before Drop
-        self.stop(is_abnormal);
+        self.stop_all(is_abnormal);
     }
 
     fn get_next_id(&mut self) -> Id {
@@ -251,13 +252,15 @@ where
                 let res = self.spawn_process(cmd, args, mode);
                 self.proto.send_response(res);
             }
-            Request::Finish { id } => self.finish_task(id),
-            Request::FinishAll => unreachable!("FinishAll must be already processed outside"),
+            Request::Stop { id } => self.stop_task(id),
+            Request::StopAll => self.stop_all(false),
+            Request::Collect => self.collect_data(),
+            Request::End => unreachable!("End must be already processed outside"),
             Request::Abort => unreachable!("Abort must be already processed outside"),
         }
     }
 
-    fn stop(mut self, abnormal: bool) {
+    fn stop_all(&mut self, abnormal: bool) {
         let mode = if abnormal { "emergency" } else { "graceful" };
         info!("stopping agent in {mode} mode");
 
@@ -277,16 +280,39 @@ where
         assert!(self.procs.is_empty());
     }
 
-    fn finish_task(&mut self, id: Id) {
+    fn stop_task(&mut self, id: Id) {
         match (self.procs.remove(&id), self.polls.remove(&id)) {
             (Some(proc), None) => stop_process(id, proc, false),
             (None, Some(poll)) => stop_poller(id, poll),
             (None, None) => {
                 self.proto
-                    .send_response(Response::Finish(Err(format!("activity {id} not found"))));
+                    .send_response(Response::Stop(Err(format!("activity {id} not found"))));
+                return;
             }
             _ => unreachable!("found both process and poller for id={id}"),
         }
+
+        self.proto.send_response(Response::Stop(Ok(id)));
+    }
+
+    fn collect_data(&mut self) {
+        // sanity checks
+        assert!(self.polls.is_empty());
+        assert!(self.procs.is_empty());
+
+        let res = Exec::cmd("tar")
+            .args(&[
+                OsStr::new("-c"),
+                OsStr::new("-z"),
+                OsStr::new("-f"),
+                OsStr::new("-"),
+                self.outdir.as_os_str(),
+            ])
+            .capture()
+            .map(|d| d.stdout)
+            .map_err(|e| format!("failed to collect data: {e}"));
+
+        self.proto.send_response(Response::Collect(res));
     }
 }
 

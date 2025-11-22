@@ -39,14 +39,16 @@ pub mod selfhosted {
         BackgroundKill,
     }
 
-    fn selfhosted_mode_to_agent(mode: Option<ExecMode>) -> SpawnMode {
-        match mode {
-            // default spawn is foreground
-            None => SpawnMode::Foreground,
-            // others are just mapped
-            Some(ExecMode::Foreground) => SpawnMode::Foreground,
-            Some(ExecMode::BackgroundWait) => SpawnMode::BackgroundWait,
-            Some(ExecMode::BackgroundKill) => SpawnMode::BackgroundKill,
+    impl From<Option<ExecMode>> for SpawnMode {
+        fn from(value: Option<ExecMode>) -> Self {
+            match value {
+                // default spawn is foreground
+                None => SpawnMode::Foreground,
+                // others are just mapped
+                Some(ExecMode::Foreground) => SpawnMode::Foreground,
+                Some(ExecMode::BackgroundWait) => SpawnMode::BackgroundWait,
+                Some(ExecMode::BackgroundKill) => SpawnMode::BackgroundKill,
+            }
         }
     }
 
@@ -62,7 +64,7 @@ pub mod selfhosted {
             args: Option<Vec<String>>,
             mode: Option<ExecMode>,
         },
-        Finish {
+        Stop {
             id: u32,
         },
         Abort,
@@ -78,6 +80,7 @@ pub mod selfhosted {
     pub struct SelfHostedProtocol {
         requests: Vec<SelfHostedRequest>,
         current: Option<Request>,
+        stopped: bool,
     }
 
     impl SelfHostedProtocol {
@@ -100,6 +103,7 @@ pub mod selfhosted {
             Ok(SelfHostedProtocol {
                 requests,
                 current: None,
+                stopped: false,
             })
         }
 
@@ -118,9 +122,14 @@ pub mod selfhosted {
 
     impl AgentOps for SelfHostedProtocol {
         fn recv_request(&mut self) -> Option<Request> {
-            // Extract the new local agent request from the config.
+            // If already stopped, stop the conversation
+            if self.stopped {
+                return Some(Request::End);
+            }
+
+            // Extract the new selfhosted agent request from the config.
             //
-            // In local mode we don't have any real PMPPT controller connected. So we try to
+            // In selfhosted mode we don't have any real PMPPT controller connected. So we try to
             // imitate its existence by remembering the current executing request to associate agent
             // responses with it.
             self.current = loop {
@@ -132,11 +141,11 @@ pub mod selfhosted {
                             break Request::Spawn {
                                 cmd,
                                 args: args.unwrap_or_default(), // default is no args
-                                mode: selfhosted_mode_to_agent(mode), // default is foreground
+                                mode: SpawnMode::from(mode),    // default is foreground
                             };
                         }
-                        SelfHostedRequest::Finish { id } => {
-                            break Request::Finish { id: Id::from(id) };
+                        SelfHostedRequest::Stop { id } => {
+                            break Request::Stop { id: Id::from(id) };
                         }
                         SelfHostedRequest::Abort => break Request::Abort,
 
@@ -156,8 +165,11 @@ pub mod selfhosted {
                         }
                     },
 
-                    // when local requests are over, implicitly generate FinishAll request
-                    None => break Request::FinishAll,
+                    // when local requests are over, generate StopAll request
+                    None => {
+                        self.stopped = true;
+                        break Request::StopAll;
+                    }
                 }
             }
             .into();
@@ -203,13 +215,15 @@ pub mod selfhosted {
                     debug!("BG spawn result: id={id}");
                 }
 
-                Response::Finish(Ok(id)) => {
-                    debug!("Finished activity with id={id}");
+                Response::Stop(Ok(id)) => {
+                    debug!("Stopped activity with id={id}");
                 }
-                Response::Finish(Err(msg)) => {
+                Response::Stop(Err(msg)) => {
                     error!(r#"Activity finish failed: error="{msg}""#);
                     self.initiate_abort();
                 }
+                Response::StopAll(..) => { /* do nothing in selfhosted mode */ }
+                Response::Collect(..) => unreachable!("In selfhosted mode Collect is never called"),
             }
 
             // in local mode this function cannot fail
@@ -220,8 +234,12 @@ pub mod selfhosted {
 
 /// Implementation of the remote protocol based on MsgPack
 pub mod tcpmsgpack {
-    use std::{io::{Read, Write}, net::TcpStream};
+    use std::{
+        io::{Read, Write},
+        net::TcpStream,
+    };
 
+    use log::error;
     use rmp_serde::Serializer;
     use serde::Serialize;
 
@@ -242,26 +260,52 @@ pub mod tcpmsgpack {
 
     impl AgentOps for TcpMsgpackProtocol {
         fn recv_request(&mut self) -> Option<communication::Request> {
-            let mut msg_size = [0u8; 4];
-            self.conn.read_exact(&mut msg_size).ok()?;
-            let msg_size = u32::from_le_bytes(msg_size);
+            let msg_size = u32::from_le_bytes({
+                let mut msg_size = [0u8; 4];
+                if self.conn.read_exact(&mut msg_size).is_err() {
+                    error!("truncated msg size");
+                    return None;
+                }
+                msg_size
+            });
 
-            let mut msg = vec![0u8; msg_size as usize];
-            self.conn.read_exact(&mut msg).ok()?;
+            let msg_buf = {
+                let mut msg = vec![0u8; msg_size as usize];
+                if self.conn.read_exact(&mut msg).is_err() {
+                    error!("truncated message");
+                    return None;
+                }
+                msg
+            };
 
-            let msg = rmp_serde::from_slice::<msgpack_impl::Request>(&msg).ok()?;
-            Some(communication::Request::from(msg))
+            match rmp_serde::from_slice::<msgpack_impl::Request>(&msg_buf) {
+                Err(e) => {
+                    error!("failed to parse msgpack::Request message: {e}");
+                    None
+                }
+                Ok(msg) => Some(communication::Request::from(msg)),
+            }
         }
 
         fn send_response(&mut self, response: communication::Response) -> Option<()> {
             let mut msg_buf = vec![];
             let msg = msgpack_impl::Response::from(response);
-            msg.serialize(&mut Serializer::new(&mut msg_buf)).unwrap();
+            msg.serialize(&mut Serializer::new(&mut msg_buf)).unwrap(); // cannot fail
 
-            let msg_size = msg_buf.len().to_le_bytes();
-
-            self.conn.write_all(&msg_size).ok()?;
-            self.conn.write_all(&msg_buf).ok()
+            let msg_size = (msg_buf.len() as u32).to_le_bytes();
+            if self.conn.write_all(&msg_size).is_err() {
+                error!("failed to send msg size");
+                return None;
+            }
+            if self.conn.write_all(&msg_buf).is_err() {
+                error!("failed to send message buffer");
+                return None;
+            }
+            if self.conn.flush().is_err() {
+                error!("failed to flush data");
+                return None;
+            }
+            Some(())
         }
     }
 }

@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use super::communication::{self, Id};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 pub enum SpawnMode {
     Foreground,
     BackgroundWait,
@@ -28,14 +28,24 @@ pub enum SpawnMode {
 impl From<SpawnMode> for communication::SpawnMode {
     fn from(value: SpawnMode) -> Self {
         match value {
-            SpawnMode::Foreground => communication::SpawnMode::Foreground,
-            SpawnMode::BackgroundWait => communication::SpawnMode::BackgroundWait,
-            SpawnMode::BackgroundKill => communication::SpawnMode::BackgroundKill,
+            SpawnMode::Foreground => Self::Foreground,
+            SpawnMode::BackgroundWait => Self::BackgroundWait,
+            SpawnMode::BackgroundKill => Self::BackgroundKill,
         }
     }
 }
 
-#[derive(Deserialize)]
+impl From<communication::SpawnMode> for SpawnMode {
+    fn from(value: communication::SpawnMode) -> Self {
+        match value {
+            communication::SpawnMode::Foreground => Self::Foreground,
+            communication::SpawnMode::BackgroundWait => Self::BackgroundWait,
+            communication::SpawnMode::BackgroundKill => Self::BackgroundKill,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
 pub enum Request {
     Poll {
         pattern: String,
@@ -45,10 +55,12 @@ pub enum Request {
         args: Vec<String>,
         mode: SpawnMode,
     },
-    Finish {
+    Stop {
         id: u32,
     },
-    FinishAll,
+    StopAll,
+    Collect,
+    End,
     Abort,
 }
 
@@ -61,20 +73,42 @@ impl From<Request> for communication::Request {
                 args,
                 mode: communication::SpawnMode::from(mode),
             },
-            Request::Finish { id } => communication::Request::Finish { id: Id::from(id) },
-            Request::FinishAll => communication::Request::FinishAll,
+            Request::Stop { id } => communication::Request::Stop { id: Id::from(id) },
+            Request::StopAll => communication::Request::StopAll,
+            Request::Collect => communication::Request::Collect,
+            Request::End => communication::Request::End,
             Request::Abort => communication::Request::Abort,
         }
     }
 }
 
+impl From<communication::Request> for Request {
+    fn from(value: communication::Request) -> Self {
+        match value {
+            communication::Request::Poll { pattern } => Self::Poll { pattern },
+            communication::Request::Spawn { cmd, args, mode } => Self::Spawn {
+                cmd,
+                args,
+                mode: SpawnMode::from(mode),
+            },
+            communication::Request::Stop { id } => Self::Stop { id: id.into() },
+            communication::Request::StopAll => Self::StopAll,
+            communication::Request::Collect => Self::Collect,
+            communication::Request::End => Self::End,
+            communication::Request::Abort => Self::Abort,
+        }
+    }
+}
+
 /// Agent's result for incoming request.
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 pub enum Response {
     Poll(Result<u32, String>),
-    Finish(Result<u32, String>),
-    SpawnBg(Result<u32, String>),
     SpawnFg(Result<(Vec<u8>, Vec<u8>), String>),
+    SpawnBg(Result<u32, String>),
+    Stop(Result<u32, String>),
+    StopAll(Result<(), String>),
+    Collect(Result<Vec<u8>, String>),
 }
 
 impl From<communication::Response> for Response {
@@ -83,7 +117,22 @@ impl From<communication::Response> for Response {
             communication::Response::Poll(res) => Self::Poll(res.map(u32::from)),
             communication::Response::SpawnFg(res) => Self::SpawnFg(res),
             communication::Response::SpawnBg(res) => Self::SpawnBg(res.map(u32::from)),
-            communication::Response::Finish(res) => Self::Finish(res.map(u32::from)),
+            communication::Response::Stop(res) => Self::Stop(res.map(u32::from)),
+            communication::Response::StopAll(res) => Self::StopAll(res),
+            communication::Response::Collect(res) => Self::Collect(res),
+        }
+    }
+}
+
+impl From<Response> for communication::Response {
+    fn from(value: Response) -> Self {
+        match value {
+            Response::Poll(res) => Self::Poll(res.map(Id::from)),
+            Response::SpawnFg(res) => Self::SpawnFg(res),
+            Response::SpawnBg(res) => Self::SpawnBg(res.map(Id::from)),
+            Response::Stop(res) => Self::Stop(res.map(Id::from)),
+            Response::StopAll(res) => Self::StopAll(res),
+            Response::Collect(res) => Self::Collect(res),
         }
     }
 }

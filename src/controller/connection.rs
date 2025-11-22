@@ -16,7 +16,10 @@
 
 use std::{collections::HashMap, net::TcpStream};
 
-use crate::common::Res;
+use crate::common::{
+    Res,
+    communication::{Request, Response},
+};
 
 use super::configuration::{AgentConfig, AgentId};
 
@@ -36,4 +39,87 @@ pub fn connect_agents(cfg: &HashMap<AgentId, AgentConfig>) -> Res<Connections> {
         conns.insert(name.clone(), Connection { _sock: sock });
     }
     Ok(conns)
+}
+
+pub trait ConnectionOps {
+    fn send(&mut self, req: Request) -> Res<()>;
+    fn recv(&mut self) -> Res<Response>;
+    fn close(self);
+}
+
+pub mod tcpmsgpack {
+    use std::{
+        io::{Read, Write},
+        net::{Shutdown, TcpStream},
+    };
+
+    use rmp_serde::Serializer;
+    use serde::Serialize;
+
+    use crate::common::{
+        Res,
+        communication::{self, Request, Response},
+        emsg, msgpack_impl,
+    };
+
+    use super::ConnectionOps;
+
+    pub struct TcpMsgpackConnection {
+        conn: TcpStream,
+    }
+
+    impl TcpMsgpackConnection {
+        pub fn from_endpoint(endpoint: &str) -> Res<Self> {
+            Ok(Self {
+                conn: TcpStream::connect(endpoint)
+                    .map_err(|e| format!("failed to connect to agent {endpoint}: {e}"))?,
+            })
+        }
+    }
+
+    impl ConnectionOps for TcpMsgpackConnection {
+        fn send(&mut self, req: Request) -> Res<()> {
+            let mut msg_buf = vec![];
+            let msg = msgpack_impl::Request::from(req);
+            msg.serialize(&mut Serializer::new(&mut msg_buf)).unwrap(); // cannot fail
+
+            let msg_size = (msg_buf.len() as u32).to_le_bytes();
+            self.conn
+                .write_all(&msg_size)
+                .map_err(|e| format!("failed to send msgsize: {e}"))?;
+            self.conn
+                .write_all(&msg_buf)
+                .map_err(|e| format!("failed to send msgbuf: {e}"))?;
+
+            Ok(())
+        }
+
+        fn recv(&mut self) -> Res<Response> {
+            let msg_size = u32::from_le_bytes({
+                let mut msg_size = [0u8; 4];
+                self.conn
+                    .read_exact(&mut msg_size)
+                    .or(emsg("truncated msgsize"))?;
+                msg_size
+            });
+
+            let msg_buf = {
+                let mut msg = vec![0u8; msg_size as usize];
+                self.conn
+                    .read_exact(&mut msg)
+                    .or(emsg("truncated message"))?;
+                msg
+            };
+
+            rmp_serde::from_slice::<msgpack_impl::Response>(&msg_buf)
+                .map(communication::Response::from)
+                .map_err(|e| format!("failed to parse msgpack::Request message: {e}"))
+        }
+
+        fn close(self) {
+            self.conn
+                .shutdown(Shutdown::Both)
+                .expect("failed to close the connection");
+        }
+    }
 }

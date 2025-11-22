@@ -27,10 +27,12 @@ pub enum Request {
         args: Vec<String>,
         mode: SpawnMode,
     },
-    Finish {
+    Stop {
         id: Id,
     },
-    FinishAll,
+    StopAll,
+    Collect,
+    End,
     Abort,
 }
 
@@ -45,6 +47,8 @@ pub enum SpawnMode {
 pub struct Id(u32);
 pub type IdOrError = Result<Id, String>;
 pub type OutOrError = Result<(Vec<u8>, Vec<u8>), String>;
+pub type UnitOrError = Result<(), String>;
+pub type DataOrError = Result<Vec<u8>, String>;
 
 impl From<u32> for Id {
     fn from(value: u32) -> Self {
@@ -65,16 +69,12 @@ impl Display for Id {
 }
 
 /// Agent's result for incoming request.
+#[derive(Debug)]
 pub enum Response {
     Poll(IdOrError),
     SpawnFg(OutOrError),
     SpawnBg(IdOrError),
-    Finish(IdOrError),
-}
-
-pub trait PmpptSerializer {
-    fn sreq(&self, req: &Request) -> Vec<u8>;
-    fn dreq(&self, data: &[u8]) -> Option<Request>;
-    fn sresp(&self, resp: &Response) -> Vec<u8>;
-    fn dresp(&self, data: &[u8]) -> Option<Response>;
+    Stop(IdOrError),
+    StopAll(UnitOrError),
+    Collect(DataOrError),
 }
