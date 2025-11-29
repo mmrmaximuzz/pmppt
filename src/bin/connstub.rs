@@ -74,8 +74,8 @@ fn main_wrapper() -> Res<()> {
         .recv()
         .map_err(|e| format!("failed to recv Stop response: {e}"))?;
     match &recv {
-        Response::Stop(Ok(..)) => (),
-        Response::Stop(Err(e)) => return emsg(&format!("failed to stop poll: {e}")),
+        Response::StopAll(Ok(..)) => (),
+        Response::StopAll(Err(e)) => return emsg(&format!("failed to stop poll: {e}")),
         _ => unreachable!("bad protocol response for Stop request from agent"),
     };
 
