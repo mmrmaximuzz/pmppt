@@ -269,6 +269,10 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
 }
 
 fn main_wrapper(args: &[String]) -> Res<()> {
+    if args.len() != 2 {
+        return emsg("usage: PROG PATH_TO_OUTPUT");
+    }
+
     let outdir = PathBuf::from(&args[1]);
     process_dir(outdir)
 }
