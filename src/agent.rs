@@ -225,29 +225,43 @@ where
     }
 
     fn lookup_paths(pattern: &str) -> Res<Vec<PathBuf>> {
-        // expand braces and interpret each expansion as a glob
-        let paths: Vec<PathBuf> = brace_expand::brace_expand(pattern)
-            .into_iter()
-            .flat_map(|p| {
-                glob::glob(&p)
-                    .expect("failed to lookup glob pattern")
-                    .map(|g| g.unwrap())
-            })
-            .collect();
+        let mut paths = Vec::default();
 
-        // TODO: fail even if just a single brace expansion led to nothing
-        // interpret empty search result as a failure
+        // expand braces and interpret each expansion as a glob
+        for part in brace_expand::brace_expand(pattern) {
+            match glob::glob(&part) {
+                Ok(ps) => {
+                    let old_len = paths.len();
+
+                    for p in ps {
+                        match p {
+                            Ok(p) => paths.push(p),
+                            Err(e) => return Err(format!("cannot lookup {part}: {e}")),
+                        }
+                    }
+
+                    // interpret empty glob match for a single brace expansion variant as an error
+                    if paths.len() == old_len {
+                        return Err(format!("in '{pattern}' got empty search result for {part}"));
+                    }
+                }
+                Err(e) => return Err(format!("bad pattern {pattern}: {e}")),
+            }
+        }
+
         if !paths.is_empty() {
             Ok(paths)
         } else {
-            let msg = format!("got empty search result on expanding '{pattern}'");
-            error!("{msg}");
-            Err(msg)
+            Err(format!("got empty search result on expanding '{pattern}'"))
         }
     }
 
     fn handle_message(&mut self, msg: Request) {
         match msg {
+            Request::LookupPaths { pattern } => {
+                self.proto
+                    .send_response(Response::LookupPaths(Self::lookup_paths(&pattern)));
+            }
             Request::Poll { pattern } => {
                 let res =
                     Self::lookup_paths(&pattern).and_then(|p| self.spawn_poller(&p, &pattern));

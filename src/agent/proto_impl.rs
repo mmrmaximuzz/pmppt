@@ -223,7 +223,12 @@ pub mod selfhosted {
                     self.initiate_abort();
                 }
                 Response::StopAll(..) => { /* do nothing in selfhosted mode */ }
-                Response::Collect(..) => unreachable!("In selfhosted mode Collect is never called"),
+                Response::Collect(..) => {
+                    unreachable!("In selfhosted mode Collect should never be called")
+                }
+                Response::LookupPaths(..) => {
+                    unreachable!("In selfhosted mode LookupPaths should never be called")
+                }
             }
 
             // in local mode this function cannot fail

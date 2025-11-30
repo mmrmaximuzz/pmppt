@@ -16,11 +16,7 @@
 
 //! Just some test program to implement the trait methods, not a useful executable
 
-use std::{
-    env,
-    fs::File,
-    io::{Read, Write},
-};
+use std::{env, fs::File, io::Write, path::PathBuf};
 
 use pmppt::{
     common::{
@@ -47,25 +43,34 @@ fn poll<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Id> {
     }
 }
 
+fn lookup_paths<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Vec<PathBuf>> {
+    conn.send(Request::LookupPaths {
+        pattern: pattern.to_string(),
+    })
+    .map_err(|e| format!("failed to send LookupPaths for {pattern}: {e}"))?;
+
+    let recv = conn
+        .recv()
+        .map_err(|e| format!("failed to recv LookupPaths response for {pattern}: {e}"))?;
+    match recv {
+        Response::LookupPaths(res) => res,
+        _ => unreachable!("bad answer for LookupPaths request {recv:?}"),
+    }
+}
+
 fn main_wrapper() -> Res<()> {
     let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        return emsg(&format!("usage: {} IPADDR:PORT", args[0]));
+    if args.len() != 3 {
+        return emsg(&format!("usage: {} IPADDR:PORT GLOB", args[0]));
     }
 
     let endpoint = &args[1];
+    let glob = &args[2];
+
     let mut conn = tcpmsgpack::TcpMsgpackConnection::from_endpoint(endpoint)?;
 
-    println!("Starting the pollers");
-    poll(&mut conn, "/proc/stat")?;
-    poll(&mut conn, "/proc/meminfo")?;
-    poll(&mut conn, "/proc/net/dev")?;
-    poll(&mut conn, "/proc/diskstats")?;
-
-    println!("Press any key to stop collection");
-    std::io::stdin()
-        .read_exact(&mut [0u8])
-        .expect("stdin is broken");
+    let diskpaths = lookup_paths(&mut conn, glob)?;
+    println!("lookup for '{glob}' = {diskpaths:?}");
 
     println!("Stopping collection");
     conn.send(Request::StopAll)

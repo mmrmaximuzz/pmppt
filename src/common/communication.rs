@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::fmt::Display;
+use std::{fmt::Display, path::PathBuf};
 
 /// Request from a Controller to an Agent
 #[derive(Debug, Clone)]
@@ -26,6 +26,9 @@ pub enum Request {
         cmd: String,
         args: Vec<String>,
         mode: SpawnMode,
+    },
+    LookupPaths {
+        pattern: String,
     },
     Stop {
         id: Id,
@@ -49,6 +52,7 @@ pub type IdOrError = Result<Id, String>;
 pub type OutOrError = Result<(Vec<u8>, Vec<u8>), String>;
 pub type UnitOrError = Result<(), String>;
 pub type DataOrError = Result<Vec<u8>, String>;
+pub type PathsOrError = Result<Vec<PathBuf>, String>;
 
 impl From<u32> for Id {
     fn from(value: u32) -> Self {
@@ -74,6 +78,7 @@ pub enum Response {
     Poll(IdOrError),
     SpawnFg(OutOrError),
     SpawnBg(IdOrError),
+    LookupPaths(PathsOrError),
     Stop(IdOrError),
     StopAll(UnitOrError),
     Collect(DataOrError),

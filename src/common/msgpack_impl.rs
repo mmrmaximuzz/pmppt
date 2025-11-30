@@ -14,6 +14,8 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 use super::communication::{self, Id};
@@ -55,6 +57,9 @@ pub enum Request {
         args: Vec<String>,
         mode: SpawnMode,
     },
+    LookupPaths {
+        pattern: String,
+    },
     Stop {
         id: u32,
     },
@@ -73,6 +78,7 @@ impl From<Request> for communication::Request {
                 args,
                 mode: communication::SpawnMode::from(mode),
             },
+            Request::LookupPaths { pattern } => communication::Request::LookupPaths { pattern },
             Request::Stop { id } => communication::Request::Stop { id: Id::from(id) },
             Request::StopAll => communication::Request::StopAll,
             Request::Collect => communication::Request::Collect,
@@ -91,6 +97,7 @@ impl From<communication::Request> for Request {
                 args,
                 mode: SpawnMode::from(mode),
             },
+            communication::Request::LookupPaths { pattern } => Self::LookupPaths { pattern },
             communication::Request::Stop { id } => Self::Stop { id: id.into() },
             communication::Request::StopAll => Self::StopAll,
             communication::Request::Collect => Self::Collect,
@@ -106,6 +113,7 @@ pub enum Response {
     Poll(Result<u32, String>),
     SpawnFg(Result<(Vec<u8>, Vec<u8>), String>),
     SpawnBg(Result<u32, String>),
+    LookupPaths(Result<Vec<PathBuf>, String>),
     Stop(Result<u32, String>),
     StopAll(Result<(), String>),
     Collect(Result<Vec<u8>, String>),
@@ -117,6 +125,7 @@ impl From<communication::Response> for Response {
             communication::Response::Poll(res) => Self::Poll(res.map(u32::from)),
             communication::Response::SpawnFg(res) => Self::SpawnFg(res),
             communication::Response::SpawnBg(res) => Self::SpawnBg(res.map(u32::from)),
+            communication::Response::LookupPaths(res) => Self::LookupPaths(res),
             communication::Response::Stop(res) => Self::Stop(res.map(u32::from)),
             communication::Response::StopAll(res) => Self::StopAll(res),
             communication::Response::Collect(res) => Self::Collect(res),
@@ -130,6 +139,7 @@ impl From<Response> for communication::Response {
             Response::Poll(res) => Self::Poll(res.map(Id::from)),
             Response::SpawnFg(res) => Self::SpawnFg(res),
             Response::SpawnBg(res) => Self::SpawnBg(res.map(Id::from)),
+            Response::LookupPaths(res) => Self::LookupPaths(res),
             Response::Stop(res) => Self::Stop(res.map(Id::from)),
             Response::StopAll(res) => Self::StopAll(res),
             Response::Collect(res) => Self::Collect(res),
