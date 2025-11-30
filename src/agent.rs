@@ -31,6 +31,7 @@ use std::{
 use log::{error, info, warn};
 use subprocess::{Exec, Popen};
 
+use crate::common::Res;
 use crate::common::communication::{Id, IdOrError, OutOrError, Request, Response, SpawnMode};
 
 /// Generic transport protocol interface.
@@ -223,29 +224,33 @@ where
         }
     }
 
+    fn lookup_paths(pattern: &str) -> Res<Vec<PathBuf>> {
+        // expand braces and interpret each expansion as a glob
+        let paths: Vec<PathBuf> = brace_expand::brace_expand(pattern)
+            .into_iter()
+            .flat_map(|p| {
+                glob::glob(&p)
+                    .expect("failed to lookup glob pattern")
+                    .map(|g| g.unwrap())
+            })
+            .collect();
+
+        // TODO: fail even if just a single brace expansion led to nothing
+        // interpret empty search result as a failure
+        if !paths.is_empty() {
+            Ok(paths)
+        } else {
+            let msg = format!("got empty search result on expanding '{pattern}'");
+            error!("{msg}");
+            Err(msg)
+        }
+    }
+
     fn handle_message(&mut self, msg: Request) {
         match msg {
             Request::Poll { pattern } => {
-                // expand braces and interpret each expansion as a glob
-                let paths: Vec<PathBuf> = brace_expand::brace_expand(&pattern)
-                    .into_iter()
-                    .flat_map(|p| {
-                        glob::glob(&p)
-                            .expect("failed to lookup glob pattern")
-                            .map(|g| g.unwrap())
-                    })
-                    .collect();
-
-                // TODO: fail even if just a single brace expansion led to nothing
-                // interpret empty search result as a failure
-                let res = if !paths.is_empty() {
-                    self.spawn_poller(&paths, &pattern)
-                } else {
-                    let msg = format!("got empty search result on expanding '{pattern}'");
-                    error!("{msg}");
-                    Err(msg)
-                };
-
+                let res =
+                    Self::lookup_paths(&pattern).and_then(|p| self.spawn_poller(&p, &pattern));
                 self.proto.send_response(Response::Poll(res));
             }
             Request::Spawn { cmd, args, mode } => {
