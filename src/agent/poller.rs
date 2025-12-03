@@ -45,7 +45,6 @@ fn create_header(files: &[PathBuf], cfg: &PollConfig) -> String {
     let header = PollHeader {
         files: files
             .iter()
-            .cloned()
             .map(|p| p.to_str().unwrap().to_owned())
             .collect(),
         period: cfg.sleep_time,

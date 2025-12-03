@@ -250,19 +250,19 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
         return emsg(&format!("{outdir:?} is not a directory"));
     }
 
-    let meminfo = readfile(&outdir.join("001-poll.log"))?;
-    let net_dev = readfile(&outdir.join("002-poll.log"))?;
-    let mpstat = readfile(&outdir.join("003-out.log"))?;
-    let iostat = readfile(&outdir.join("004-out.log"))?;
+    let mpstat = readfile(&outdir.join("001-out.log"))?;
+    let iostat = readfile(&outdir.join("002-out.log"))?;
+    let netdev = readfile(&outdir.join("003-poll.log"))?;
+    let meminfo = readfile(&outdir.join("004-poll.log"))?;
 
-    let meminfo = procfs::parse_meminfo(&meminfo)?;
     let mpstat = sysstat::mpstat::parse(&mpstat)?;
     let iostat = sysstat::iostat::parse(&iostat)?;
-    let net_dev = procfs::parse_net_dev(&net_dev)?;
+    let netdev = procfs::parse_net_dev(&netdev)?;
+    let meminfo = procfs::parse_meminfo(&meminfo)?;
 
-    plot_meminfo(meminfo).write_html("meminfo.html");
-    plot_net_dev(net_dev).write_html("net_dev.html");
     plot_heatmaps(mpstat).write_html("mpstat.html");
+    plot_meminfo(meminfo).write_html("meminfo.html");
+    plot_net_dev(netdev).write_html("netdev.html");
     plot_iostat(iostat).write_html("iostat.html");
 
     Ok(())

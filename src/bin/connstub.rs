@@ -21,27 +21,14 @@ use std::{env, fs::File, io::Write, path::PathBuf};
 use pmppt::{
     common::{
         Res,
-        communication::{Id, Request, Response},
+        communication::{Request, Response},
         emsg,
     },
-    controller::connection::{ConnectionOps, tcpmsgpack},
+    controller::{
+        activity::default_activities::{self},
+        connection::{ConnectionOps, tcpmsgpack::TcpMsgpackConnection},
+    },
 };
-
-fn poll<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Id> {
-    conn.send(Request::Poll {
-        pattern: pattern.to_string(),
-    })
-    .map_err(|e| format!("failed to send Poll for {pattern}: {e}"))?;
-
-    let recv = conn
-        .recv()
-        .map_err(|e| format!("failed to recv Poll response for {pattern}: {e}"))?;
-    match recv {
-        Response::Poll(Ok(id)) => Ok(id),
-        Response::Poll(Err(e)) => Err(format!("failed to launch Poll for {pattern}: {e}")),
-        _ => unreachable!("bad answer for Poll request {recv:?}"),
-    }
-}
 
 fn lookup_paths<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Vec<PathBuf>> {
     conn.send(Request::LookupPaths {
@@ -61,18 +48,41 @@ fn lookup_paths<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Vec<PathBu
 fn main_wrapper() -> Res<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
-        return emsg(&format!("usage: {} IPADDR:PORT GLOB", args[0]));
+        return emsg(&format!("usage: {} IPADDR:PORT OUTPUT_ARCHIVE", args[0]));
+    }
+    let endpoint = &args[1];
+    let output_path = PathBuf::from(&args[2]);
+
+    let mut conn = TcpMsgpackConnection::from_endpoint(endpoint)?;
+
+    let mpstat = default_activities::launch_mpstat();
+    let iostat = default_activities::launch_iostat();
+    let netdev = default_activities::proc_net_dev();
+    let meminfo = default_activities::proc_meminfo();
+    let fio = default_activities::launch_fio(vec![
+        String::from("--name=cpuburn"),
+        String::from("--ioengine=cpuio"),
+        String::from("--cpuload=100"),
+        String::from("--time_based=1"),
+        String::from("--runtime=5"),
+    ]);
+
+    let mut activities = [
+        (mpstat, "mpstat", None),
+        (iostat, "iostat", None),
+        (netdev, "netdev", None),
+        (meminfo, "meminfo", None),
+        (fio, "fio", None),
+    ];
+
+    println!("starting scenario");
+    for item in &mut activities {
+        let res = item.0.start(&mut conn)?;
+        item.2 = res;
     }
 
-    let endpoint = &args[1];
-    let glob = &args[2];
+    println!("waiting the load to end");
 
-    let mut conn = tcpmsgpack::TcpMsgpackConnection::from_endpoint(endpoint)?;
-
-    let diskpaths = lookup_paths(&mut conn, glob)?;
-    println!("lookup for '{glob}' = {diskpaths:?}");
-
-    println!("Stopping collection");
     conn.send(Request::StopAll)
         .map_err(|e| format!("failed to send Stop request: {e}"))?;
     let recv = conn
@@ -97,11 +107,18 @@ fn main_wrapper() -> Res<()> {
     };
 
     println!("Writing archive");
-    File::create_new("archive.tgz")
+    File::create(output_path.join("out.tgz"))
         .unwrap()
         .write_all(&data)
         .unwrap();
-    drop(data);
+    drop(data); // explicitly release the memory used for archive
+
+    println!("Writing activity map");
+    let mut f = File::create(output_path.join("out.map")).unwrap();
+    for (_, name, id) in activities {
+        f.write_all(format!("{:03} {name}\n", u32::from(id.unwrap())).as_bytes())
+            .unwrap();
+    }
 
     println!("Terminating session");
     conn.send(Request::End)
