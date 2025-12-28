@@ -14,20 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::ffi::OsStr;
 use std::fs::File;
-use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use chrono::NaiveDateTime;
 use plotly::layout::{Axis, GridPattern, LayoutGrid};
+use plotly::{self, HeatMap, Layout, Plot, Scatter};
+use serde::Serialize;
+use subprocess::Exec;
+use tempdir::TempDir;
+
 use pmppt::common::{Res, emsg};
 use pmppt::plotters::procfs::{Meminfo, NetDev};
 use pmppt::plotters::sysstat::iostat::Iostat;
-use pmppt::plotters::{procfs, sysstat};
-
-use plotly::{self, HeatMap, Layout, Plot, Scatter};
 use pmppt::plotters::sysstat::mpstat::Mpstat;
-use serde::Serialize;
+use pmppt::plotters::{procfs, sysstat};
 
 // newtype to support Serialize trait for NaiveDateTime
 #[derive(Clone)]
@@ -237,12 +239,32 @@ fn plot_iostat(iostat: Iostat) -> Plot {
 }
 
 fn readfile(path: &Path) -> Res<String> {
+    use std::io::Read;
+
     let mut buf = String::with_capacity(32 * 1024);
     File::open(path)
-        .unwrap()
+        .expect(&format!("failed to open file {path:?}"))
         .read_to_string(&mut buf)
         .map_err(|e| format!("failed to open {path:?}: {e}"))?;
     Ok(buf)
+}
+
+fn read_mapping(path: &Path) -> Res<Vec<(String, String)>> {
+    let content = readfile(path)?;
+
+    let mut res = vec![];
+    for item in content.lines() {
+        let (num, name) = item.split_once(" ").expect("bad mapping: {item} ?!");
+        let datasuffix = match name {
+            "mpstat" => "out.log",
+            "iostat" => "out.log",
+            "netdev" => "poll.log",
+            "meminfo" => "poll.log",
+            _ => continue,
+        };
+        res.push((name.to_string(), format!("{num}-{datasuffix}")));
+    }
+    Ok(res)
 }
 
 fn process_dir(outdir: PathBuf) -> Res<()> {
@@ -250,20 +272,33 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
         return emsg(&format!("{outdir:?} is not a directory"));
     }
 
-    let mpstat = readfile(&outdir.join("001-out.log"))?;
-    let iostat = readfile(&outdir.join("002-out.log"))?;
-    let netdev = readfile(&outdir.join("003-poll.log"))?;
-    let meminfo = readfile(&outdir.join("004-poll.log"))?;
+    let plotdir = TempDir::new_in(&outdir, "plotter")
+        .map_err(|e| format!("failed to create tempdir for plotting: {e}"))?;
 
-    let mpstat = sysstat::mpstat::parse(&mpstat)?;
-    let iostat = sysstat::iostat::parse(&iostat)?;
-    let netdev = procfs::parse_net_dev(&netdev)?;
-    let meminfo = procfs::parse_meminfo(&meminfo)?;
+    // unpack the data array
+    Exec::cmd("tar")
+        .args(&[
+            OsStr::new("-xf"),
+            outdir.join("out.tgz").as_os_str(),
+            OsStr::new("-C"),
+            plotdir.path().as_os_str(),
+            OsStr::new("--strip-components=2"),
+        ])
+        .join()
+        .map_err(|e| format!("failed to unpack the data array: {e}"))?;
 
-    plot_heatmaps(mpstat).write_html("mpstat.html");
-    plot_meminfo(meminfo).write_html("meminfo.html");
-    plot_net_dev(netdev).write_html("netdev.html");
-    plot_iostat(iostat).write_html("iostat.html");
+    // process the data
+    for (name, filestr) in read_mapping(&outdir.join("out.map"))? {
+        let content = readfile(&plotdir.path().join(filestr))?;
+        let outfile = outdir.join(format!("{name}.html"));
+        match name.as_str() {
+            "mpstat" => plot_heatmaps(sysstat::mpstat::parse(&content)?).write_html(outfile),
+            "iostat" => plot_iostat(sysstat::iostat::parse(&content)?).write_html(outfile),
+            "netdev" => plot_net_dev(procfs::parse_net_dev(&content)?).write_html(outfile),
+            "meminfo" => plot_meminfo(procfs::parse_meminfo(&content)?).write_html(outfile),
+            _ => unreachable!("{name}"),
+        };
+    }
 
     Ok(())
 }
