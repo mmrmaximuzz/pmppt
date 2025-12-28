@@ -236,4 +236,16 @@ pub mod default_activities {
             id: None,
         })
     }
+
+    pub fn launch_flamegraph() -> Box<dyn Activity> {
+        Box::new(Launcher {
+            comm: String::from("flamegraph"),
+            mode: SpawnMode::BackgroundWait, // TODO: need to add SIGINT handler
+            args: ["-F", "99", "--", "--all-cpus"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+            id: None,
+        })
+    }
 }
