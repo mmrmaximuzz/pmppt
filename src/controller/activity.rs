@@ -31,12 +31,30 @@ pub trait Activity {
 }
 
 pub mod default_activities {
+    use std::thread::sleep;
+    use std::time::Duration;
+
     use crate::common::Res;
     use crate::common::communication::Request::{self, Poll};
     use crate::common::communication::{Id, Response, SpawnMode};
     use crate::controller::connection::ConnectionOps;
 
     use super::Activity;
+
+    struct Sleeper {
+        period: Duration,
+    }
+
+    impl Activity for Sleeper {
+        fn start(&mut self, _conn: &mut dyn ConnectionOps) -> Res<Option<Id>> {
+            sleep(self.period);
+            Ok(None)
+        }
+    }
+
+    pub fn get_sleeper(period: Duration) -> Box<dyn Activity> {
+        Box::new(Sleeper { period })
+    }
 
     struct Poller {
         pattern: String,

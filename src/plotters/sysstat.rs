@@ -338,7 +338,7 @@ pub mod iostat {
             fstchunk
                 .lines()
                 .nth(1)
-                .ok_or_else(|| format!("bad first chunk: {fstchunk}"))?
+                .ok_or_else(|| format!("iostat: bad first chunk: {fstchunk}"))?
                 .split_ascii_whitespace()
                 .skip(1) // skip the first column as it is device name
                 .map(IostatCol::from_str)
@@ -348,9 +348,17 @@ pub mod iostat {
         for chunk in chunks {
             let (time, lines) = chunk
                 .split_once('\n')
-                .ok_or_else(|| format!("bad chunk {chunk}"))?;
-            let tstamp = NaiveDateTime::parse_from_str(time, "%m/%d/%Y %I:%M:%S %p")
-                .map_err(|e| format!("failed to parse time {time}: {e}"))?;
+                .ok_or_else(|| format!("iostat: bad chunk {chunk}"))?;
+            let tstamp = {
+                let t1 = NaiveDateTime::parse_from_str(time, "%m/%d/%Y %I:%M:%S %p");
+                let t2 = NaiveDateTime::parse_from_str(time, "%m/%d/%Y %H:%M:%S");
+                match (t1, t2) {
+                    (Ok(t), Err(_)) => t,
+                    (Err(_), Ok(t)) => t,
+                    (Err(e1), Err(e2)) => return Err(format!("iostat: failed to parse naive time '{time}': {e1}, {e2}")),
+                    (Ok(_), Ok(_)) => unreachable!(),
+                }
+            };
             iostat.times.push(tstamp.to_string());
 
             // skip the first line (it is header that we already parsed)
@@ -360,7 +368,7 @@ pub mod iostat {
                 // explicitly extract the disk name
                 let disk = items
                     .next()
-                    .ok_or_else(|| format!("bad iostat line: {line}"))?;
+                    .ok_or_else(|| format!("iostat: bad line: {line}"))?;
 
                 iostat.disks.insert(disk.to_string());
 

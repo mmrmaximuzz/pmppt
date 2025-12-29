@@ -16,7 +16,7 @@
 
 //! Just some test program to implement the trait methods, not a useful executable
 
-use std::{env, fs::File, io::Write, path::PathBuf};
+use std::{env, fs::File, io::Write, path::PathBuf, time::Duration};
 
 use pmppt::{
     common::{
@@ -59,12 +59,19 @@ fn main_wrapper() -> Res<()> {
     let iostat = default_activities::launch_iostat();
     let netdev = default_activities::proc_net_dev();
     let meminfo = default_activities::proc_meminfo();
+
+    // add some sleep to get some point before the test for the reference
+    let sleeper = default_activities::get_sleeper(Duration::from_secs(3));
+
     let fio = default_activities::launch_fio(vec![
-        String::from("--name=cpuburn"),
-        String::from("--ioengine=cpuio"),
-        String::from("--cpuload=100"),
-        String::from("--time_based=1"),
-        String::from("--runtime=5"),
+        String::from("--name=iouring-large-write-verify-loopdev-over-tmpfs"),
+        String::from("--ioengine=io_uring"),
+        String::from("--iodepth=4"),
+        String::from("--direct=1"),
+        String::from("--filename=/dev/loop0"),
+        String::from("--rw=write"),
+        String::from("--blocksize=128K"),
+        String::from("--loops=200"),
     ]);
 
     let mut activities = [
@@ -72,6 +79,7 @@ fn main_wrapper() -> Res<()> {
         (iostat, "iostat", None),
         (netdev, "netdev", None),
         (meminfo, "meminfo", None),
+        (sleeper, "sleeper", None),
         (fio, "fio", None),
     ];
 
@@ -116,7 +124,12 @@ fn main_wrapper() -> Res<()> {
     println!("Writing activity map");
     let mut f = File::create(output_path.join("out.map")).unwrap();
     for (_, name, id) in activities {
-        f.write_all(format!("{:03} {name}\n", u32::from(id.unwrap())).as_bytes())
+        let id = match id {
+            Some(id) => id,
+            None => continue,
+        };
+
+        f.write_all(format!("{:03} {name}\n", u32::from(id)).as_bytes())
             .unwrap();
     }
 
