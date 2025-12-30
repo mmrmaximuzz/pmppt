@@ -75,7 +75,8 @@ fn main_wrapper() -> Res<()> {
         String::from("--rw=write"),
         String::from("--blocksize=4K"),
         String::from("--loops=50"),
-        String::from("--bandwidth-log"),
+        String::from("--write_bw_log=bw"),
+        String::from("--log_avg_msec=250"),
     ]);
 
     let mut activities = [
