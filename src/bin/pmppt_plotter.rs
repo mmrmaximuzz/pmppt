@@ -29,7 +29,7 @@ use pmppt::common::{Res, emsg};
 use pmppt::plotters::procfs::{Meminfo, NetDev};
 use pmppt::plotters::sysstat::iostat::Iostat;
 use pmppt::plotters::sysstat::mpstat::Mpstat;
-use pmppt::plotters::{procfs, sysstat};
+use pmppt::plotters::{fio, procfs, sysstat};
 
 // newtype to support Serialize trait for NaiveDateTime
 #[derive(Clone)]
@@ -243,26 +243,37 @@ fn readfile(path: &Path) -> Res<String> {
 
     let mut buf = String::with_capacity(32 * 1024);
     File::open(path)
-        .expect(&format!("failed to open file {path:?}"))
+        .unwrap_or_else(|_| panic!("failed to open file {path:?}"))
         .read_to_string(&mut buf)
         .map_err(|e| format!("failed to open {path:?}: {e}"))?;
     Ok(buf)
 }
 
-fn read_mapping(path: &Path) -> Res<Vec<(String, String)>> {
+type PlotInfo = (String, String, String, Option<String>);
+
+fn read_mapping(path: &Path) -> Res<Vec<PlotInfo>> {
     let content = readfile(path)?;
 
     let mut res = vec![];
     for item in content.lines() {
-        let (num, name) = item.split_once(" ").expect("bad mapping: {item} ?!");
+        let parts: Vec<&str> = item.split_whitespace().collect();
+        let num = parts[0];
+        let name = parts[1];
+        let param = parts.get(2).map(|s| s.to_string());
         let datasuffix = match name {
             "mpstat" => "out.log",
             "iostat" => "out.log",
             "netdev" => "poll.log",
             "meminfo" => "poll.log",
+            "fio" => "out.log",
             _ => continue,
         };
-        res.push((name.to_string(), format!("{num}-{datasuffix}")));
+        res.push((
+            name.to_string(),
+            format!("{num}-{datasuffix}"),
+            format!("{num}-data"),
+            param,
+        ));
     }
     Ok(res)
 }
@@ -288,7 +299,7 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
         .map_err(|e| format!("failed to unpack the data array: {e}"))?;
 
     // process the data
-    for (name, filestr) in read_mapping(&outdir.join("out.map"))? {
+    for (name, filestr, datadir, options) in read_mapping(&outdir.join("out.map"))? {
         let content = readfile(&plotdir.path().join(filestr))?;
         let outfile = outdir.join(format!("{name}.html"));
         match name.as_str() {
@@ -296,6 +307,15 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
             "iostat" => plot_iostat(sysstat::iostat::parse(&content)?).write_html(outfile),
             "netdev" => plot_net_dev(procfs::parse_net_dev(&content)?).write_html(outfile),
             "meminfo" => plot_meminfo(procfs::parse_meminfo(&content)?).write_html(outfile),
+            "fio" => {
+                if let Some(opts) = options {
+                    for (name, graph) in
+                        fio::process(&content, &plotdir.path().join(datadir), &opts)
+                    {
+                        graph.write_html(outdir.join(format!("{name}.html")));
+                    }
+                }
+            }
             _ => unreachable!("{name}"),
         };
     }

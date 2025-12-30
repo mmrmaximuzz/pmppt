@@ -45,6 +45,9 @@ fn lookup_paths<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Vec<PathBu
     }
 }
 
+const BW_FILE_NAME: &str = "bw";
+const LHIST_FILE_NAME: &str = "custom_name2";
+
 fn main_wrapper() -> Res<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
@@ -68,15 +71,17 @@ fn main_wrapper() -> Res<()> {
 
     let fio = default_activities::launch_fio(vec![
         String::from("--name=iouring-large-write-verify-loopdev-over-tmpfs"),
-        String::from("--ioengine=io_uring"),
+        String::from("--ioengine=sync"),
         String::from("--iodepth=1"),
         String::from("--direct=1"),
         String::from("--filename=/dev/loop0"),
-        String::from("--rw=write"),
+        String::from("--rw=readwrite"),
         String::from("--blocksize=4K"),
         String::from("--loops=50"),
-        String::from("--write_bw_log=bw"),
+        format!("--write_bw_log={BW_FILE_NAME}"),
+        format!("--write_hist_log={LHIST_FILE_NAME}"),
         String::from("--log_avg_msec=1000"),
+        String::from("--log_hist_msec=1000"),
     ]);
 
     let mut activities = [
@@ -85,7 +90,7 @@ fn main_wrapper() -> Res<()> {
         (netdev, "netdev", None, None),
         (meminfo, "meminfo", None, None),
         (sleeper, "sleeper", None, None),
-        (fio, "fio", None, Some("bw")),
+        (fio, "fio", None, Some(BW_FILE_NAME)),
     ];
 
     println!("starting scenario");
@@ -134,17 +139,8 @@ fn main_wrapper() -> Res<()> {
             None => continue,
         };
 
-        f.write_all(
-            format!(
-                "{id:03} {name} {}\n",
-                match args {
-                    None => "",
-                    Some(args) => args,
-                }
-            )
-            .as_bytes(),
-        )
-        .unwrap();
+        f.write_all(format!("{id:03} {name} {}\n", args.unwrap_or("")).as_bytes())
+            .unwrap();
     }
 
     println!("Terminating session");
