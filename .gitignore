@@ -1,1 +1,5 @@
+# rust output
 /target
+
+# dev files
+justfile

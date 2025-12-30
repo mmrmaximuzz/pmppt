@@ -18,6 +18,7 @@ pub mod poller;
 pub mod proto_impl;
 
 use std::ffi::OsStr;
+use std::fs::create_dir;
 use std::io::Read;
 use std::sync::atomic::Ordering;
 use std::{
@@ -139,13 +140,17 @@ where
         let id = self.get_next_id();
         let outpath = self.outdir.join(format!("{id:03}-out.log"));
         let errpath = self.outdir.join(format!("{id:03}-err.log"));
-        let file_out = File::create_new(outpath.clone()).unwrap();
-        let file_err = File::create_new(errpath.clone()).unwrap();
+        let cwdpath = self.outdir.join(format!("{id:03}-data"));
+
+        let file_out = File::create_new(&outpath).unwrap();
+        let file_err = File::create_new(&errpath).unwrap();
+        create_dir(&cwdpath).unwrap();
 
         let cmd = Exec::cmd(&cmd)
             .args(&args)
             .stdout(file_out)
-            .stderr(file_err);
+            .stderr(file_err)
+            .cwd(cwdpath);
 
         // collect the name before spawning the process
         let name = cmd.to_cmdline_lossy();
@@ -182,13 +187,19 @@ where
         wait4: bool,
     ) -> IdOrError {
         let id = self.get_next_id();
-        let file_out = File::create_new(self.outdir.join(format!("{id:03}-out.log"))).unwrap();
-        let file_err = File::create_new(self.outdir.join(format!("{id:03}-err.log"))).unwrap();
+        let outpath = self.outdir.join(format!("{id:03}-out.log"));
+        let errpath = self.outdir.join(format!("{id:03}-err.log"));
+        let cwdpath = self.outdir.join(format!("{id:03}-data"));
+
+        let file_out = File::create_new(&outpath).unwrap();
+        let file_err = File::create_new(&errpath).unwrap();
+        create_dir(&cwdpath).unwrap();
 
         let cmd = Exec::cmd(&cmd)
             .args(&args)
             .stdout(file_out)
-            .stderr(file_err);
+            .stderr(file_err)
+            .cwd(cwdpath);
 
         let name = cmd.to_cmdline_lossy();
         let popen = cmd.popen().map_err(|e| {
