@@ -345,7 +345,8 @@ pub mod iostat {
                 .collect()
         };
 
-        for chunk in chunks {
+        // skip the first chunk - it could contain rubbish
+        for chunk in chunks.iter().skip(1) {
             let (time, lines) = chunk
                 .split_once('\n')
                 .ok_or_else(|| format!("iostat: bad chunk {chunk}"))?;

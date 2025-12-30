@@ -55,8 +55,11 @@ fn main_wrapper() -> Res<()> {
 
     let mut conn = TcpMsgpackConnection::from_endpoint(endpoint)?;
 
+    // first get loop devs
+    let loopdevs = lookup_paths(&mut conn, "/dev/loop0")?;
+
     let mpstat = default_activities::launch_mpstat();
-    let iostat = default_activities::launch_iostat();
+    let iostat = default_activities::launch_iostat_on(&loopdevs);
     let netdev = default_activities::proc_net_dev();
     let meminfo = default_activities::proc_meminfo();
 
@@ -66,12 +69,13 @@ fn main_wrapper() -> Res<()> {
     let fio = default_activities::launch_fio(vec![
         String::from("--name=iouring-large-write-verify-loopdev-over-tmpfs"),
         String::from("--ioengine=io_uring"),
-        String::from("--iodepth=4"),
+        String::from("--iodepth=1"),
         String::from("--direct=1"),
         String::from("--filename=/dev/loop0"),
         String::from("--rw=write"),
-        String::from("--blocksize=128K"),
-        String::from("--loops=200"),
+        String::from("--blocksize=4K"),
+        String::from("--loops=50"),
+        String::from("--bandwidth-log"),
     ]);
 
     let mut activities = [

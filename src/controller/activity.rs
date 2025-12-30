@@ -31,6 +31,7 @@ pub trait Activity {
 }
 
 pub mod default_activities {
+    use std::path::PathBuf;
     use std::thread::sleep;
     use std::time::Duration;
 
@@ -234,16 +235,21 @@ pub mod default_activities {
         })
     }
 
-    pub fn launch_iostat() -> Box<dyn Activity> {
+    pub fn launch_iostat_on(devs: &[PathBuf]) -> Box<dyn Activity> {
         Box::new(Launcher {
             comm: String::from("iostat"),
             mode: SpawnMode::BackgroundKill,
             args: ["-d", "-t", "-x", "-m", "1"]
                 .into_iter()
                 .map(String::from)
+                .chain(devs.iter().map(|p| p.to_string_lossy().to_string()))
                 .collect(),
             id: None,
         })
+    }
+
+    pub fn launch_iostat() -> Box<dyn Activity> {
+        launch_iostat_on(&[])
     }
 
     pub fn launch_fio(cfg: Vec<String>) -> Box<dyn Activity> {
