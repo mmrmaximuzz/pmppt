@@ -64,7 +64,7 @@ fn main_wrapper() -> Res<()> {
     let meminfo = default_activities::proc_meminfo();
 
     // add some sleep to get some point before the test for the reference
-    let sleeper = default_activities::get_sleeper(Duration::from_secs(3));
+    let sleeper = default_activities::get_sleeper(Duration::from_secs(2));
 
     let fio = default_activities::launch_fio(vec![
         String::from("--name=iouring-large-write-verify-loopdev-over-tmpfs"),
@@ -76,16 +76,16 @@ fn main_wrapper() -> Res<()> {
         String::from("--blocksize=4K"),
         String::from("--loops=50"),
         String::from("--write_bw_log=bw"),
-        String::from("--log_avg_msec=250"),
+        String::from("--log_avg_msec=1000"),
     ]);
 
     let mut activities = [
-        (mpstat, "mpstat", None),
-        (iostat, "iostat", None),
-        (netdev, "netdev", None),
-        (meminfo, "meminfo", None),
-        (sleeper, "sleeper", None),
-        (fio, "fio", None),
+        (mpstat, "mpstat", None, None),
+        (iostat, "iostat", None, None),
+        (netdev, "netdev", None, None),
+        (meminfo, "meminfo", None, None),
+        (sleeper, "sleeper", None, None),
+        (fio, "fio", None, Some("bw")),
     ];
 
     println!("starting scenario");
@@ -128,14 +128,23 @@ fn main_wrapper() -> Res<()> {
 
     println!("Writing activity map");
     let mut f = File::create(output_path.join("out.map")).unwrap();
-    for (_, name, id) in activities {
+    for (_, name, id, args) in activities {
         let id = match id {
-            Some(id) => id,
+            Some(id) => u32::from(id),
             None => continue,
         };
 
-        f.write_all(format!("{:03} {name}\n", u32::from(id)).as_bytes())
-            .unwrap();
+        f.write_all(
+            format!(
+                "{id:03} {name} {}\n",
+                match args {
+                    None => "",
+                    Some(args) => args,
+                }
+            )
+            .as_bytes(),
+        )
+        .unwrap();
     }
 
     println!("Terminating session");

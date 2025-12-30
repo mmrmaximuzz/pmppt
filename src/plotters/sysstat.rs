@@ -356,7 +356,11 @@ pub mod iostat {
                 match (t1, t2) {
                     (Ok(t), Err(_)) => t,
                     (Err(_), Ok(t)) => t,
-                    (Err(e1), Err(e2)) => return Err(format!("iostat: failed to parse naive time '{time}': {e1}, {e2}")),
+                    (Err(e1), Err(e2)) => {
+                        return Err(format!(
+                            "iostat: failed to parse naive time '{time}': {e1}, {e2}"
+                        ));
+                    }
                     (Ok(_), Ok(_)) => unreachable!(),
                 }
             };
