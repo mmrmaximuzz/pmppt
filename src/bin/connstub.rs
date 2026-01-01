@@ -46,7 +46,8 @@ fn lookup_paths<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Vec<PathBu
 }
 
 const BW_FILE_NAME: &str = "bw";
-const LHIST_FILE_NAME: &str = "custom_name2";
+const IOPS_FILE_NAME: &str = "iops";
+const LAT_FILE_NAME: &str = "lat";
 
 fn main_wrapper() -> Res<()> {
     let args: Vec<String> = env::args().collect();
@@ -77,11 +78,13 @@ fn main_wrapper() -> Res<()> {
         String::from("--filename=/dev/loop0"),
         String::from("--rw=readwrite"),
         String::from("--blocksize=4K"),
-        String::from("--loops=50"),
+        String::from("--loops=1"),
+        String::from("--rate_iops=750"),
         format!("--write_bw_log={BW_FILE_NAME}"),
-        format!("--write_hist_log={LHIST_FILE_NAME}"),
-        String::from("--log_avg_msec=1000"),
-        String::from("--log_hist_msec=1000"),
+        format!("--write_iops_log={IOPS_FILE_NAME}"),
+        format!("--write_lat_log={LAT_FILE_NAME}"),
+        String::from("--log_avg_msec=500"),
+        String::from("--numjobs=2"),
     ]);
 
     let mut activities = [
@@ -90,7 +93,12 @@ fn main_wrapper() -> Res<()> {
         (netdev, "netdev", None, None),
         (meminfo, "meminfo", None, None),
         (sleeper, "sleeper", None, None),
-        (fio, "fio", None, Some(BW_FILE_NAME)),
+        (
+            fio,
+            "fio",
+            None,
+            Some(format!("{BW_FILE_NAME}:{IOPS_FILE_NAME}:{LAT_FILE_NAME}")),
+        ),
     ];
 
     println!("starting scenario");
@@ -139,7 +147,7 @@ fn main_wrapper() -> Res<()> {
             None => continue,
         };
 
-        f.write_all(format!("{id:03} {name} {}\n", args.unwrap_or("")).as_bytes())
+        f.write_all(format!("{id:03} {name} {}\n", args.unwrap_or("".to_string())).as_bytes())
             .unwrap();
     }
 

@@ -309,11 +309,8 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
             "meminfo" => plot_meminfo(procfs::parse_meminfo(&content)?).write_html(outfile),
             "fio" => {
                 if let Some(opts) = options {
-                    for (name, graph) in
-                        fio::process(&content, &plotdir.path().join(datadir), &opts)
-                    {
-                        graph.write_html(outdir.join(format!("{name}.html")));
-                    }
+                    fio::process(&content, &plotdir.path().join(datadir), &opts)
+                        .write_html(outfile);
                 }
             }
             _ => unreachable!("{name}"),
