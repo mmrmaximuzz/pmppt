@@ -265,7 +265,7 @@ pub mod default_activities {
         Box::new(Launcher {
             comm: String::from("flamegraph"),
             mode: SpawnMode::BackgroundWait, // TODO: need to add SIGINT handler
-            args: ["-F", "99", "--", "--all-cpus"]
+            args: ["-F", "99", "--", "--all-cpus", "sleep", "3"]
                 .into_iter()
                 .map(String::from)
                 .collect(),

@@ -66,6 +66,7 @@ fn main_wrapper() -> Res<()> {
     let iostat = default_activities::launch_iostat_on(&loopdevs);
     let netdev = default_activities::proc_net_dev();
     let meminfo = default_activities::proc_meminfo();
+    let fgraph = default_activities::launch_flamegraph();
 
     // add some sleep to get some point before the test for the reference
     let sleeper = default_activities::get_sleeper(Duration::from_secs(2));
@@ -99,6 +100,7 @@ fn main_wrapper() -> Res<()> {
             None,
             Some(format!("{BW_FILE_NAME}:{IOPS_FILE_NAME}:{LAT_FILE_NAME}")),
         ),
+        (fgraph, "flamegraph", None, None),
     ];
 
     println!("starting scenario");
