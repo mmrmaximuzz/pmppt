@@ -24,30 +24,19 @@ use pmppt::{
         communication::{Request, Response},
         emsg,
     },
-    controller::{
-        activity::default_activities::{self},
-        connection::{ConnectionOps, tcpmsgpack::TcpMsgpackConnection},
-    },
+    controller::{activity::default_activities, connection::ConnectionOps, storage::Storage},
 };
-
-fn lookup_paths<C: ConnectionOps>(conn: &mut C, pattern: &str) -> Res<Vec<PathBuf>> {
-    conn.send(Request::LookupPaths {
-        pattern: pattern.to_string(),
-    })
-    .map_err(|e| format!("failed to send LookupPaths for {pattern}: {e}"))?;
-
-    let recv = conn
-        .recv()
-        .map_err(|e| format!("failed to recv LookupPaths response for {pattern}: {e}"))?;
-    match recv {
-        Response::LookupPaths(res) => res,
-        _ => unreachable!("bad answer for LookupPaths request {recv:?}"),
-    }
-}
 
 const BW_FILE_NAME: &str = "bw";
 const IOPS_FILE_NAME: &str = "iops";
 const LAT_FILE_NAME: &str = "lat";
+
+const DEVICE_ARTIFACT_NAME: &str = "LOOP_DEVICES";
+
+fn create_connection(endpoint: &str) -> Res<impl ConnectionOps> {
+    use pmppt::controller::connection::tcpmsgpack::TcpMsgpackConnection;
+    TcpMsgpackConnection::from_endpoint(endpoint)
+}
 
 fn main_wrapper() -> Res<()> {
     let args: Vec<String> = env::args().collect();
@@ -57,13 +46,12 @@ fn main_wrapper() -> Res<()> {
     let endpoint = &args[1];
     let output_path = PathBuf::from(&args[2]);
 
-    let mut conn = TcpMsgpackConnection::from_endpoint(endpoint)?;
+    let mut conn = create_connection(endpoint)?;
+    let mut stor = Storage::default();
 
-    // first get loop devs
-    let loopdevs = lookup_paths(&mut conn, "/dev/loop0")?;
-
+    let loopdevs = default_activities::lookup_paths("/dev/loop{0,1}", DEVICE_ARTIFACT_NAME);
     let mpstat = default_activities::launch_mpstat();
-    let iostat = default_activities::launch_iostat_on(&loopdevs);
+    let iostat = default_activities::launch_iostat_on(DEVICE_ARTIFACT_NAME);
     let netdev = default_activities::proc_net_dev();
     let meminfo = default_activities::proc_meminfo();
     let fgraph = default_activities::launch_flamegraph();
@@ -89,6 +77,7 @@ fn main_wrapper() -> Res<()> {
     ]);
 
     let mut activities = [
+        (loopdevs, "loopdevs", None, None),
         (mpstat, "mpstat", None, None),
         (iostat, "iostat", None, None),
         (netdev, "netdev", None, None),
@@ -105,7 +94,7 @@ fn main_wrapper() -> Res<()> {
 
     println!("starting scenario");
     for item in &mut activities {
-        let res = item.0.start(&mut conn)?;
+        let res = item.0.start(&mut conn, &mut stor)?;
         item.2 = res;
     }
 
@@ -157,6 +146,8 @@ fn main_wrapper() -> Res<()> {
     conn.send(Request::End)
         .map_err(|e| format!("failed to send End request: {e}"))?;
     conn.close();
+
+    println!("Artifacts: {stor:?}");
 
     Ok(())
 }

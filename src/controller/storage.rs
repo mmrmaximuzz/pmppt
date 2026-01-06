@@ -14,7 +14,34 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-pub mod activity;
-pub mod configuration;
-pub mod connection;
-pub mod storage;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use crate::types::Value;
+
+#[derive(Default, Debug)]
+pub struct Storage {
+    stor: Arc<Mutex<HashMap<String, Value>>>,
+}
+
+impl Storage {
+    pub fn set(&mut self, key: &str, val: Value) {
+        let mut stor = self.stor.lock().unwrap();
+        let res = stor.insert(key.to_string(), val);
+
+        assert!(
+            res.is_none(),
+            "TODO: must be guaranteed by storage verification"
+        );
+    }
+
+    pub fn get(&self, key: &str) -> Value {
+        let stor = self.stor.lock().unwrap();
+        let val = stor
+            .get(key)
+            .expect("TODO: validate key existence by external verificator");
+        (*val).clone()
+    }
+}

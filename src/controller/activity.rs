@@ -14,7 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::common::{Res, communication::Id};
+use crate::{
+    common::{Res, communication::Id},
+    controller::storage::Storage,
+};
 
 use super::{configuration::Run, connection::ConnectionOps};
 
@@ -23,7 +26,7 @@ pub fn process_run(_run: &Run) -> Res<()> {
 }
 
 pub trait Activity {
-    fn start(&mut self, conn: &mut dyn ConnectionOps) -> Res<Option<Id>>;
+    fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &mut Storage) -> Res<Option<Id>>;
     fn stop(&mut self, _conn: &mut dyn ConnectionOps) -> Res<()> {
         // by default stop is a noop
         Ok(())
@@ -31,7 +34,6 @@ pub trait Activity {
 }
 
 pub mod default_activities {
-    use std::path::PathBuf;
     use std::thread::sleep;
     use std::time::Duration;
 
@@ -39,6 +41,8 @@ pub mod default_activities {
     use crate::common::communication::Request::{self, Poll};
     use crate::common::communication::{Id, Response, SpawnMode};
     use crate::controller::connection::ConnectionOps;
+    use crate::controller::storage::Storage;
+    use crate::types::Value;
 
     use super::Activity;
 
@@ -47,7 +51,7 @@ pub mod default_activities {
     }
 
     impl Activity for Sleeper {
-        fn start(&mut self, _conn: &mut dyn ConnectionOps) -> Res<Option<Id>> {
+        fn start(&mut self, _conn: &mut dyn ConnectionOps, _stor: &mut Storage) -> Res<Option<Id>> {
             sleep(self.period);
             Ok(None)
         }
@@ -63,7 +67,7 @@ pub mod default_activities {
     }
 
     impl Activity for Poller {
-        fn start(&mut self, conn: &mut dyn ConnectionOps) -> Res<Option<Id>> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &mut Storage) -> Res<Option<Id>> {
             conn.send(Poll {
                 pattern: self.pattern.clone(),
             })
@@ -150,7 +154,7 @@ pub mod default_activities {
     }
 
     impl Activity for Launcher {
-        fn start(&mut self, conn: &mut dyn ConnectionOps) -> Res<Option<Id>> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &mut Storage) -> Res<Option<Id>> {
             conn.send(Request::Spawn {
                 cmd: self.comm.clone(),
                 args: self.args.clone(),
@@ -235,21 +239,49 @@ pub mod default_activities {
         })
     }
 
-    pub fn launch_iostat_on(devs: &[PathBuf]) -> Box<dyn Activity> {
-        Box::new(Launcher {
-            comm: String::from("iostat"),
-            mode: SpawnMode::BackgroundKill,
-            args: ["-d", "-t", "-x", "-m", "1"]
-                .into_iter()
-                .map(String::from)
-                .chain(devs.iter().map(|p| p.to_string_lossy().to_string()))
-                .collect(),
-            id: None,
+    struct IostatLauncher {
+        launcher: Launcher,
+        input: Option<String>,
+    }
+
+    impl Activity for IostatLauncher {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &mut Storage) -> Res<Option<Id>> {
+            if let Some(ref name) = self.input {
+                let items = match stor.get(name) {
+                    Value::StringList(items) => items,
+                };
+                // extend default iostat launcher with custom device paths
+                self.launcher.args.extend_from_slice(&items);
+            }
+            self.launcher.start(conn, stor)
+        }
+
+        fn stop(&mut self, conn: &mut dyn ConnectionOps) -> Res<()> {
+            self.launcher.stop(conn)
+        }
+    }
+
+    fn launch_iostat_fn(name: Option<&str>) -> Box<dyn Activity> {
+        Box::new(IostatLauncher {
+            launcher: Launcher {
+                comm: String::from("iostat"),
+                mode: SpawnMode::BackgroundKill,
+                args: ["-d", "-t", "-x", "-m", "1"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                id: None,
+            },
+            input: name.map(|s| s.to_string()),
         })
     }
 
+    pub fn launch_iostat_on(name: &str) -> Box<dyn Activity> {
+        launch_iostat_fn(Some(name))
+    }
+
     pub fn launch_iostat() -> Box<dyn Activity> {
-        launch_iostat_on(&[])
+        launch_iostat_fn(None)
     }
 
     pub fn launch_fio(cfg: Vec<String>) -> Box<dyn Activity> {
@@ -270,6 +302,44 @@ pub mod default_activities {
                 .map(String::from)
                 .collect(),
             id: None,
+        })
+    }
+
+    struct LookupPaths {
+        pattern: String,
+        out: String,
+    }
+
+    impl Activity for LookupPaths {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &mut Storage) -> Res<Option<Id>> {
+            conn.send(Request::LookupPaths {
+                pattern: self.pattern.clone(),
+            })
+            .map_err(|e| format!("failed to send LookupPath request: {e}"))?;
+
+            let paths = match conn
+                .recv()
+                .map_err(|e| format!("failed to recv LookupPath response: {e}"))?
+            {
+                Response::LookupPaths(path_bufs) => path_bufs?,
+                otherwise => unreachable!("protocol exception: bad response: {otherwise:?}"),
+            };
+
+            // convert to StringList
+            let paths = paths
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect();
+
+            stor.set(&self.out, Value::StringList(paths));
+            Ok(None)
+        }
+    }
+
+    pub fn lookup_paths(pattern: &str, out: &str) -> Box<dyn Activity> {
+        Box::new(LookupPaths {
+            pattern: pattern.to_string(),
+            out: out.to_string(),
         })
     }
 }
