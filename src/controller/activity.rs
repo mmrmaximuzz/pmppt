@@ -122,7 +122,7 @@ impl ActivityConfig {
             Some(output) => {
                 let items: Vec<_> = output.iter().collect();
                 match &items[..] {
-                    [a] => a.clone(),
+                    [a] => *a,
                     [] => {
                         return Err(format!(
                             "expected single artifact '{expected_name}', but got none"
@@ -151,12 +151,20 @@ impl ActivityConfig {
         Ok(bind_name.to_string())
     }
 
-    pub fn verify_single_artifact_in<T: AsRef<str>>(&self, expected_name: T) -> Res<String> {
-        Self::verify_single_artifact(&self.input, expected_name.as_ref())
+    pub fn verify_single_artifact_in(&self, name: &str) -> Res<String> {
+        Self::verify_single_artifact(&self.input, name)
     }
 
-    pub fn verify_single_artifact_out<T: AsRef<str>>(&self, expected_name: T) -> Res<String> {
-        Self::verify_single_artifact(&self.output, expected_name.as_ref())
+    pub fn verify_single_artifact_out(&self, name: &str) -> Res<String> {
+        Self::verify_single_artifact(&self.output, name)
+    }
+
+    pub fn verify_optional_single_artifact_in(&self, name: &str) -> Res<Option<String>> {
+        if self.input.is_none() {
+            Ok(None)
+        } else {
+            Ok(Some(self.verify_single_artifact_in(name)?))
+        }
     }
 }
 
@@ -428,14 +436,7 @@ pub mod default_activities {
             ));
         }
 
-        let devs_art_name = if let Some(_) = conf.input {
-            Some(
-                conf.verify_single_artifact_in("devices")
-                    .map_err(|e| format!("iostat expect optional input artifact: {e}"))?,
-            )
-        } else {
-            None
-        };
+        let devs_art_name = conf.verify_optional_single_artifact_in("devices")?;
 
         Ok(Box::new(IostatLauncher {
             launcher: Launcher {
