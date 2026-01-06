@@ -14,9 +14,12 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::{collections::HashMap, time::Duration};
+
 use crate::{
     common::{Res, communication::Id},
     controller::storage::Storage,
+    types::ConfigValue,
 };
 
 use super::{configuration::Run, connection::ConnectionOps};
@@ -33,6 +36,132 @@ pub trait Activity {
     }
 }
 
+type ArtifactNameBinding = HashMap<String, String>;
+
+#[derive(Debug, Default)]
+pub struct ActivityConfig {
+    pub value: Option<ConfigValue>,
+    pub input: Option<ArtifactNameBinding>,
+    pub output: Option<ArtifactNameBinding>,
+}
+
+impl ActivityConfig {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.value.is_none() && self.input.is_none() && self.output.is_none()
+    }
+
+    pub fn has_value(&self) -> bool {
+        self.value.is_some()
+    }
+
+    pub fn has_artifacts_in(&self) -> bool {
+        self.input.is_some()
+    }
+
+    pub fn has_artifacts_out(&self) -> bool {
+        self.output.is_some()
+    }
+
+    pub fn has_artifacts(&self) -> bool {
+        self.has_artifacts_in() || self.has_artifacts_out()
+    }
+
+    pub fn with_time(time: Duration) -> Self {
+        Self {
+            value: Some(ConfigValue::Time(time)),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_str<T: AsRef<str>>(s: T) -> Self {
+        Self {
+            value: Some(ConfigValue::String(s.as_ref().to_string())),
+            ..Default::default()
+        }
+    }
+
+    pub fn artifact_in<T: AsRef<str>>(mut self, art_name: T, bind_name: T) -> Self {
+        if let Some(ref mut input) = self.input {
+            input.insert(
+                art_name.as_ref().to_string(),
+                bind_name.as_ref().to_string(),
+            );
+        } else {
+            self.input = Some(HashMap::from([(
+                art_name.as_ref().to_string(),
+                bind_name.as_ref().to_string(),
+            )]));
+        }
+        self
+    }
+
+    pub fn artifact_out<T: AsRef<str>>(mut self, art_name: T, bind_name: T) -> Self {
+        if let Some(ref mut output) = self.output {
+            output.insert(
+                art_name.as_ref().to_string(),
+                bind_name.as_ref().to_string(),
+            );
+        } else {
+            self.output = Some(HashMap::from([(
+                art_name.as_ref().to_string(),
+                bind_name.as_ref().to_string(),
+            )]));
+        }
+        self
+    }
+
+    fn verify_single_artifact(
+        bind: &Option<ArtifactNameBinding>,
+        expected_name: &str,
+    ) -> Res<String> {
+        let (art_name, bind_name) = match bind {
+            Some(output) => {
+                let items: Vec<_> = output.iter().collect();
+                match &items[..] {
+                    [a] => a.clone(),
+                    [] => {
+                        return Err(format!(
+                            "expected single artifact '{expected_name}', but got none"
+                        ));
+                    }
+                    _ => {
+                        return Err(format!(
+                            "expected single artifact '{expected_name}', but got many: {items:?}"
+                        ));
+                    }
+                }
+            }
+            None => {
+                return Err(format!(
+                    "expected single artifact '{expected_name}', but got no artifacts"
+                ));
+            }
+        };
+
+        if art_name != expected_name {
+            return Err(format!(
+                "expected artifact '{expected_name}', but got '{art_name}'"
+            ));
+        }
+
+        Ok(bind_name.to_string())
+    }
+
+    pub fn verify_single_artifact_in<T: AsRef<str>>(&self, expected_name: T) -> Res<String> {
+        Self::verify_single_artifact(&self.input, expected_name.as_ref())
+    }
+
+    pub fn verify_single_artifact_out<T: AsRef<str>>(&self, expected_name: T) -> Res<String> {
+        Self::verify_single_artifact(&self.output, expected_name.as_ref())
+    }
+}
+
+pub type ActivityCreator = dyn Fn(ActivityConfig) -> Res<Box<dyn Activity>>;
+
 pub mod default_activities {
     use std::thread::sleep;
     use std::time::Duration;
@@ -40,9 +169,10 @@ pub mod default_activities {
     use crate::common::Res;
     use crate::common::communication::Request::{self, Poll};
     use crate::common::communication::{Id, Response, SpawnMode};
+    use crate::controller::activity::ActivityConfig;
     use crate::controller::connection::ConnectionOps;
     use crate::controller::storage::Storage;
-    use crate::types::Value;
+    use crate::types::{ArtifactValue, ConfigValue};
 
     use super::Activity;
 
@@ -57,8 +187,19 @@ pub mod default_activities {
         }
     }
 
-    pub fn get_sleeper(period: Duration) -> Box<dyn Activity> {
-        Box::new(Sleeper { period })
+    pub fn sleeper_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        if conf.has_artifacts() {
+            return Err(format!(
+                "sleeper does not accept artifacts but got: {conf:?}"
+            ));
+        }
+
+        match conf.value {
+            Some(ConfigValue::Time(period)) => Ok(Box::new(Sleeper { period })),
+            other => Err(format!(
+                "sleeper expects just single UInt argument, got {other:?}"
+            )),
+        }
     }
 
     struct Poller {
@@ -130,20 +271,30 @@ pub mod default_activities {
     }
 
     impl Poller {
-        fn create(pattern: &str) -> Box<dyn Activity> {
-            Box::new(Self {
+        fn create(pattern: &str) -> Self {
+            Self {
                 pattern: pattern.to_string(),
                 id: None,
-            })
+            }
         }
     }
 
-    pub fn proc_meminfo() -> Box<dyn Activity> {
-        Poller::create("/proc/meminfo")
+    pub fn proc_meminfo_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        if !conf.is_empty() {
+            return Err(format!(
+                "meminfo poller expects no config, but got: {conf:?}"
+            ));
+        }
+        Ok(Box::new(Poller::create("/proc/meminfo")))
     }
 
-    pub fn proc_net_dev() -> Box<dyn Activity> {
-        Poller::create("/proc/net/dev")
+    pub fn proc_net_dev_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        if !conf.is_empty() {
+            return Err(format!(
+                "net_dev poller expects no config, but got: {conf:?}"
+            ));
+        }
+        Ok(Box::new(Poller::create("/proc/net/dev")))
     }
 
     struct Launcher {
@@ -230,13 +381,17 @@ pub mod default_activities {
         }
     }
 
-    pub fn launch_mpstat() -> Box<dyn Activity> {
-        Box::new(Launcher {
+    pub fn mpstat_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        if !conf.is_empty() {
+            return Err(format!("mpstat accepts empty config, but got {conf:?}"));
+        }
+
+        Ok(Box::new(Launcher {
             comm: String::from("mpstat"),
             mode: SpawnMode::BackgroundKill,
             args: ["-P", "ALL", "1"].into_iter().map(String::from).collect(),
             id: None,
-        })
+        }))
     }
 
     struct IostatLauncher {
@@ -248,7 +403,7 @@ pub mod default_activities {
         fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &mut Storage) -> Res<Option<Id>> {
             if let Some(ref name) = self.input {
                 let items = match stor.get(name) {
-                    Value::StringList(items) => items,
+                    ArtifactValue::StringList(items) => items,
                 };
                 // extend default iostat launcher with custom device paths
                 self.launcher.args.extend_from_slice(&items);
@@ -261,8 +416,28 @@ pub mod default_activities {
         }
     }
 
-    fn launch_iostat_fn(name: Option<&str>) -> Box<dyn Activity> {
-        Box::new(IostatLauncher {
+    pub fn iostat_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        if conf.has_value() {
+            return Err(format!("iostat expect no value, but got {:?}", conf.value));
+        }
+
+        if conf.has_artifacts_out() {
+            return Err(format!(
+                "iostat expect no output artifacts but got {:?}",
+                conf.output
+            ));
+        }
+
+        let devs_art_name = if let Some(_) = conf.input {
+            Some(
+                conf.verify_single_artifact_in("devices")
+                    .map_err(|e| format!("iostat expect optional input artifact: {e}"))?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Box::new(IostatLauncher {
             launcher: Launcher {
                 comm: String::from("iostat"),
                 mode: SpawnMode::BackgroundKill,
@@ -272,16 +447,8 @@ pub mod default_activities {
                     .collect(),
                 id: None,
             },
-            input: name.map(|s| s.to_string()),
-        })
-    }
-
-    pub fn launch_iostat_on(name: &str) -> Box<dyn Activity> {
-        launch_iostat_fn(Some(name))
-    }
-
-    pub fn launch_iostat() -> Box<dyn Activity> {
-        launch_iostat_fn(None)
+            input: devs_art_name,
+        }))
     }
 
     pub fn launch_fio(cfg: Vec<String>) -> Box<dyn Activity> {
@@ -293,21 +460,25 @@ pub mod default_activities {
         })
     }
 
-    pub fn launch_flamegraph() -> Box<dyn Activity> {
-        Box::new(Launcher {
+    pub fn flamegraph_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        if !conf.is_empty() {
+            return Err(format!("flamegraph expects no config, but got: {conf:?}"));
+        }
+
+        Ok(Box::new(Launcher {
             comm: String::from("flamegraph"),
-            mode: SpawnMode::BackgroundWait, // TODO: need to add SIGINT handler
+            mode: SpawnMode::BackgroundWait, // TODO: add SIGINT handler
             args: ["-F", "99", "--", "--all-cpus", "sleep", "3"]
                 .into_iter()
                 .map(String::from)
                 .collect(),
             id: None,
-        })
+        }))
     }
 
     struct LookupPaths {
         pattern: String,
-        out: String,
+        out_paths: String,
     }
 
     impl Activity for LookupPaths {
@@ -325,21 +496,37 @@ pub mod default_activities {
                 otherwise => unreachable!("protocol exception: bad response: {otherwise:?}"),
             };
 
-            // convert to StringList
             let paths = paths
                 .iter()
                 .map(|p| p.to_string_lossy().to_string())
                 .collect();
 
-            stor.set(&self.out, Value::StringList(paths));
+            stor.set(&self.out_paths, ArtifactValue::StringList(paths));
             Ok(None)
         }
     }
 
-    pub fn lookup_paths(pattern: &str, out: &str) -> Box<dyn Activity> {
-        Box::new(LookupPaths {
-            pattern: pattern.to_string(),
-            out: out.to_string(),
-        })
+    pub fn lookup_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        if conf.has_artifacts_in() {
+            return Err(format!(
+                "lookup expects no input artifacts but got: {:?}",
+                conf.input
+            ));
+        }
+
+        let pattern = match conf.value {
+            Some(ConfigValue::String(ref pattern)) => pattern.clone(),
+            other => {
+                return Err(format!(
+                    "lookup expects config value of type String, got: {other:?}"
+                ));
+            }
+        };
+
+        let out_paths = conf
+            .verify_single_artifact_out("paths")
+            .map_err(|e| format!("lookup out 'paths': {e}"))?;
+
+        Ok(Box::new(LookupPaths { pattern, out_paths }))
     }
 }

@@ -19,15 +19,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::types::Value;
+use crate::types::ArtifactValue;
 
 #[derive(Default, Debug)]
 pub struct Storage {
-    stor: Arc<Mutex<HashMap<String, Value>>>,
+    stor: Arc<Mutex<HashMap<String, ArtifactValue>>>,
 }
 
 impl Storage {
-    pub fn set(&mut self, key: &str, val: Value) {
+    pub fn set(&mut self, key: &str, val: ArtifactValue) {
         let mut stor = self.stor.lock().unwrap();
         let res = stor.insert(key.to_string(), val);
 
@@ -37,7 +37,7 @@ impl Storage {
         );
     }
 
-    pub fn get(&self, key: &str) -> Value {
+    pub fn get(&self, key: &str) -> ArtifactValue {
         let stor = self.stor.lock().unwrap();
         let val = stor
             .get(key)

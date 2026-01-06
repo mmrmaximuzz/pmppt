@@ -14,7 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::time::Duration;
+
 #[derive(Clone, Debug)]
-pub enum Value {
+pub enum ArtifactValue {
     StringList(Vec<String>),
+}
+
+// Keep in sync with ArtifactValue
+// TODO: remove code duplication by using some kind of macro
+#[derive(Clone, Debug)]
+pub enum ArtifactValueType {
+    StringList,
+}
+
+#[derive(Clone, Debug)]
+pub enum ConfigValue {
+    String(String),
+    Time(Duration),
 }

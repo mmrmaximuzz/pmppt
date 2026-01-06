@@ -87,21 +87,13 @@ pub fn process(_content: &str, datadir: &Path, options: &str) -> Plot {
     }
 
     let ftypes: &[(_, &dyn Fn(u64) -> f64, _)] = &[
-        (
-            bwfiles,
-            &|x| x as f64 / 1024.0,
-            (("x", "y"), ("x2", "y2")),
-        ),
+        (bwfiles, &|x| x as f64 / 1024.0, (("x", "y"), ("x2", "y2"))),
         (
             iopsfiles,
             &|x| x as f64 / 1000.0,
             (("x3", "y3"), ("x4", "y4")),
         ),
-        (
-            latfiles,
-            &|x| x as f64 / 1e6,
-            (("x5", "y5"), ("x6", "y6")),
-        ),
+        (latfiles, &|x| x as f64 / 1e6, (("x5", "y5"), ("x6", "y6"))),
     ];
 
     let mut plot = Plot::new();

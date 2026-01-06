@@ -24,7 +24,11 @@ use pmppt::{
         communication::{Request, Response},
         emsg,
     },
-    controller::{activity::default_activities, connection::ConnectionOps, storage::Storage},
+    controller::{
+        activity::{ActivityConfig, ActivityCreator, default_activities},
+        connection::ConnectionOps,
+        storage::Storage,
+    },
 };
 
 const BW_FILE_NAME: &str = "bw";
@@ -49,15 +53,23 @@ fn main_wrapper() -> Res<()> {
     let mut conn = create_connection(endpoint)?;
     let mut stor = Storage::default();
 
-    let loopdevs = default_activities::lookup_paths("/dev/loop{0,1}", DEVICE_ARTIFACT_NAME);
-    let mpstat = default_activities::launch_mpstat();
-    let iostat = default_activities::launch_iostat_on(DEVICE_ARTIFACT_NAME);
-    let netdev = default_activities::proc_net_dev();
-    let meminfo = default_activities::proc_meminfo();
-    let fgraph = default_activities::launch_flamegraph();
+    let mpstat: &ActivityCreator = &default_activities::mpstat_creator;
+    let netdev: &ActivityCreator = &default_activities::proc_net_dev_creator;
+    let meminf: &ActivityCreator = &default_activities::proc_meminfo_creator;
+    let fgraph: &ActivityCreator = &default_activities::flamegraph_creator;
+    let lookup: &ActivityCreator = &default_activities::lookup_creator;
+    let iostat: &ActivityCreator = &default_activities::iostat_creator;
+    let sleeper: &ActivityCreator = &default_activities::sleeper_creator;
 
-    // add some sleep to get some point before the test for the reference
-    let sleeper = default_activities::get_sleeper(Duration::from_secs(2));
+    let mpstat = mpstat(ActivityConfig::new())?;
+    let netdev = netdev(ActivityConfig::new())?;
+    let meminf = meminf(ActivityConfig::new())?;
+    let fgraph = fgraph(ActivityConfig::new())?;
+    let sleeper = sleeper(ActivityConfig::with_time(Duration::from_secs(2)))?;
+    let lookup_loopdevs =
+        lookup(ActivityConfig::with_str("/dev/loop0").artifact_out("paths", DEVICE_ARTIFACT_NAME))?;
+
+    let iostat = iostat(ActivityConfig::new().artifact_in("devices", DEVICE_ARTIFACT_NAME))?;
 
     let fio = default_activities::launch_fio(vec![
         String::from("--name=iouring-large-write-verify-loopdev-over-tmpfs"),
@@ -77,11 +89,11 @@ fn main_wrapper() -> Res<()> {
     ]);
 
     let mut activities = [
-        (loopdevs, "loopdevs", None, None),
+        (lookup_loopdevs, "loopdevs", None, None),
         (mpstat, "mpstat", None, None),
         (iostat, "iostat", None, None),
         (netdev, "netdev", None, None),
-        (meminfo, "meminfo", None, None),
+        (meminf, "meminfo", None, None),
         (sleeper, "sleeper", None, None),
         (
             fio,
@@ -147,7 +159,7 @@ fn main_wrapper() -> Res<()> {
         .map_err(|e| format!("failed to send End request: {e}"))?;
     conn.close();
 
-    println!("Artifacts: {stor:?}");
+    dbg!(stor);
 
     Ok(())
 }
