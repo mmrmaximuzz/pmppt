@@ -46,7 +46,7 @@ fn find_max_numeric_dir(base: &Path) -> Res<u32> {
 
 fn create_outdir(base: &Path) -> Res<PathBuf> {
     if base.exists() && !base.is_dir() {
-        return emsg(&format!("path provided '{base:?}' is not a directory"));
+        return Err(format!("path provided '{base:?}' is not a directory"));
     }
 
     let new_dir_num = if base.exists() {
@@ -129,7 +129,7 @@ fn main_wrapper(args: &[String]) -> Res<()> {
     match args[1].as_str() {
         "selfhosted" => main_selfhosted(&args[2..]),
         "tcp-msgpack" => main_tcp_msgpack(&args[2..]),
-        other => emsg(&format!("unsupported agent mode '{other}'")),
+        other => Err(format!("unsupported agent mode '{other}'")),
     }
 }
 

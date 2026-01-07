@@ -21,6 +21,6 @@ pub type PmpptErr = String;
 pub type Res<T> = Result<T, PmpptErr>;
 
 /// Little helper function to convert str literals to error message.
-pub fn emsg<T, U: ?Sized + AsRef<str>>(s: &U) -> Res<T> {
-    Err(s.as_ref().into())
+pub fn emsg<T, U: AsRef<str>>(s: U) -> Res<T> {
+    Err(s.as_ref().to_string())
 }

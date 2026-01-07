@@ -54,11 +54,32 @@ fn parse_fio_log(
     (rd_time, rd_vals, wr_time, wr_vals)
 }
 
+fn match_prefix(prefixes: &[String], s: &str) -> bool {
+    for prefix in prefixes {
+        if s.starts_with(prefix) {
+            return true;
+        }
+    }
+    false
+}
+
 pub fn process(_content: &str, datadir: &Path, options: &str) -> Plot {
-    let options: Vec<&str> = options.split(":").collect();
-    let bw_prefix = format!("{}_bw.", options[0]);
-    let iops_prefix = format!("{}_iops.", options[1]);
-    let lat_prefix = format!("{}_lat.", options[2]); // use only total latency values
+    let options: Vec<&str> = options.split(",").collect();
+    assert_eq!(options.len(), 3);
+
+    let bw_prefixes: Vec<_> = options[0]
+        .split(":")
+        .map(|s| format!("{}_bw.", s))
+        .collect();
+    let iops_prefixes: Vec<_> = options[1]
+        .split(":")
+        .map(|s| format!("{}_iops.", s))
+        .collect();
+
+    let lat_prefixes: Vec<_> = options[2] // use only total latency values
+        .split(":")
+        .map(|s| format!("{}_lat.", s))
+        .collect();
 
     // filter files by type
     let mut bwfiles = vec![];
@@ -70,17 +91,17 @@ pub fn process(_content: &str, datadir: &Path, options: &str) -> Plot {
             None => continue,
         };
 
-        if name.starts_with(&bw_prefix) {
+        if match_prefix(&bw_prefixes, &name) {
             bwfiles.push((name, path));
             continue;
         }
 
-        if name.starts_with(&iops_prefix) {
+        if match_prefix(&iops_prefixes, &name) {
             iopsfiles.push((name, path));
             continue;
         }
 
-        if name.starts_with(&lat_prefix) {
+        if match_prefix(&lat_prefixes, &name) {
             latfiles.push((name, path));
             continue;
         }

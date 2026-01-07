@@ -177,7 +177,7 @@ where
             .read_to_end(&mut stderr)
             .expect("cannot read stderr file");
 
-        Ok((stdout, stderr))
+        Ok((id, stdout, stderr))
     }
 
     fn spawn_process_background(

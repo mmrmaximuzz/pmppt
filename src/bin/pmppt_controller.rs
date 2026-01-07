@@ -17,7 +17,7 @@
 use std::{env, fs::File, io::Read, path::PathBuf, str::FromStr};
 
 use pmppt::{
-    common::{Res, emsg},
+    common::Res,
     controller::{activity, configuration, connection},
 };
 
@@ -38,7 +38,7 @@ fn main_wrapper() -> Res<()> {
 fn parse_cli_args() -> Res<String> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
-        return emsg(&format!("usage: {} PATH_TO_CONFIG", args[0]));
+        return Err(format!("usage: {} PATH_TO_CONFIG", args[0]));
     }
 
     Ok(args[1].clone())

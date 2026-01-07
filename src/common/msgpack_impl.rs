@@ -111,7 +111,7 @@ impl From<communication::Request> for Request {
 #[derive(Deserialize, Serialize)]
 pub enum Response {
     Poll(Result<u32, String>),
-    SpawnFg(Result<(Vec<u8>, Vec<u8>), String>),
+    SpawnFg(Result<(u32, Vec<u8>, Vec<u8>), String>),
     SpawnBg(Result<u32, String>),
     LookupPaths(Result<Vec<PathBuf>, String>),
     Stop(Result<u32, String>),
@@ -123,7 +123,9 @@ impl From<communication::Response> for Response {
     fn from(value: communication::Response) -> Self {
         match value {
             communication::Response::Poll(res) => Self::Poll(res.map(u32::from)),
-            communication::Response::SpawnFg(res) => Self::SpawnFg(res),
+            communication::Response::SpawnFg(res) => {
+                Self::SpawnFg(res.map(|(id, out, err)| (u32::from(id), out, err)))
+            }
             communication::Response::SpawnBg(res) => Self::SpawnBg(res.map(u32::from)),
             communication::Response::LookupPaths(res) => Self::LookupPaths(res),
             communication::Response::Stop(res) => Self::Stop(res.map(u32::from)),
@@ -137,7 +139,9 @@ impl From<Response> for communication::Response {
     fn from(value: Response) -> Self {
         match value {
             Response::Poll(res) => Self::Poll(res.map(Id::from)),
-            Response::SpawnFg(res) => Self::SpawnFg(res),
+            Response::SpawnFg(res) => {
+                Self::SpawnFg(res.map(|(id, out, err)| (Id::from(id), out, err)))
+            }
             Response::SpawnBg(res) => Self::SpawnBg(res.map(Id::from)),
             Response::LookupPaths(res) => Self::LookupPaths(res),
             Response::Stop(res) => Self::Stop(res.map(Id::from)),

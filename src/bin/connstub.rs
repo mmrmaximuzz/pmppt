@@ -16,101 +16,147 @@
 
 //! Just some test program to implement the trait methods, not a useful executable
 
-use std::{env, fs::File, io::Write, path::PathBuf, time::Duration};
+use std::{collections::HashMap, env, fs::File, io::Write, path::PathBuf, time::Duration};
 
 use pmppt::{
     common::{
         Res,
         communication::{Request, Response},
-        emsg,
     },
     controller::{
-        activity::{ActivityConfig, ActivityCreator, default_activities},
+        activity::{Activity, ActivityConfig, ActivityCreator, ActivityCreatorFn},
         connection::ConnectionOps,
         storage::Storage,
     },
+    types::IniLike,
 };
-
-const BW_FILE_NAME: &str = "bw";
-const IOPS_FILE_NAME: &str = "iops";
-const LAT_FILE_NAME: &str = "lat";
-
-const DEVICE_ARTIFACT_NAME: &str = "LOOP_DEVICES";
 
 fn create_connection(endpoint: &str) -> Res<impl ConnectionOps> {
     use pmppt::controller::connection::tcpmsgpack::TcpMsgpackConnection;
     TcpMsgpackConnection::from_endpoint(endpoint)
 }
 
+type ActivityDatabase = HashMap<String, ActivityCreator>;
+
+fn collect_activity_database() -> ActivityDatabase {
+    use pmppt::controller::activity::default_activities::*;
+
+    let creators_info: &[(&str, ActivityCreatorFn)] = &[
+        ("sleep", sleeper_creator),
+        ("mpstat", mpstat_creator),
+        ("iostat", iostat_creator),
+        ("netdev", proc_net_dev_creator),
+        ("meminfo", proc_meminfo_creator),
+        ("lookup_paths", lookup_creator),
+        ("flamegraph", flamegraph_creator),
+        ("fio", fio_creator),
+    ];
+
+    let mut db: ActivityDatabase = HashMap::new();
+    for (name, func) in creators_info {
+        db.insert(name.to_string(), Box::new(func));
+    }
+    db
+}
+
+fn configure_pipeline(db: &ActivityDatabase) -> Res<Vec<(String, Box<dyn Activity>)>> {
+    let pipeline_info = [
+        ("mpstat", ActivityConfig::new()),
+        ("netdev", ActivityConfig::new()),
+        ("meminfo", ActivityConfig::new()),
+        (
+            "lookup_paths",
+            ActivityConfig::with_str("/dev/loop0").artifact_out("paths", "LOOP_DEVS"),
+        ),
+        (
+            "iostat",
+            ActivityConfig::new().artifact_in("devices", "LOOP_DEVS"),
+        ),
+        ("sleep", ActivityConfig::with_time(Duration::from_secs(2))),
+        (
+            "fio",
+            ActivityConfig::with_ini(
+                IniLike::with_global(&[
+                    "ioengine=sync",
+                    "direct=1",
+                    "rate_iops=750",
+                    "filename=/dev/loop0",
+                    "loops=1",
+                    "log_avg_msec=500",
+                ])
+                .section(
+                    "reader",
+                    &[
+                        "rw=read",
+                        "write_bw_log=read-bw",
+                        "write_iops_log=read-iops",
+                        "write_lat_log=read-lat",
+                    ],
+                )
+                .section(
+                    "writer",
+                    &[
+                        "rw=write",
+                        "write_bw_log=write-bw",
+                        "write_iops_log=write-iops",
+                        "write_lat_log=write-lat",
+                    ],
+                ),
+            ),
+        ),
+        ("flamegraph", ActivityConfig::new()),
+    ];
+
+    let mut pipeline = vec![];
+    for (name, conf) in pipeline_info.into_iter() {
+        let factory = db.get(name).ok_or(format!(
+            "failed to find ActivityCreator for activity '{name}'"
+        ))?;
+        let activity = factory(conf).map_err(|e| format!("failed to construct '{name}': {e}"))?;
+        pipeline.push((name.to_string(), activity));
+    }
+    Ok(pipeline)
+}
+
 fn main_wrapper() -> Res<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
-        return emsg(&format!("usage: {} IPADDR:PORT OUTPUT_ARCHIVE", args[0]));
+        return Err(format!("usage: {} IPADDR:PORT OUTPUT_ARCHIVE", args[0]));
     }
     let endpoint = &args[1];
     let output_path = PathBuf::from(&args[2]);
 
+    println!("Collecting activities");
+    let creators = collect_activity_database();
+
+    println!("Configuring pipeline");
+    let mut pipeline = configure_pipeline(&creators)?;
+
+    println!("Connecting to agent");
     let mut conn = create_connection(endpoint)?;
-    let mut stor = Storage::default();
+    let stor = Storage::default();
 
-    let mpstat: &ActivityCreator = &default_activities::mpstat_creator;
-    let netdev: &ActivityCreator = &default_activities::proc_net_dev_creator;
-    let meminf: &ActivityCreator = &default_activities::proc_meminfo_creator;
-    let fgraph: &ActivityCreator = &default_activities::flamegraph_creator;
-    let lookup: &ActivityCreator = &default_activities::lookup_creator;
-    let iostat: &ActivityCreator = &default_activities::iostat_creator;
-    let sleeper: &ActivityCreator = &default_activities::sleeper_creator;
-
-    let mpstat = mpstat(ActivityConfig::new())?;
-    let netdev = netdev(ActivityConfig::new())?;
-    let meminf = meminf(ActivityConfig::new())?;
-    let fgraph = fgraph(ActivityConfig::new())?;
-    let sleeper = sleeper(ActivityConfig::with_time(Duration::from_secs(2)))?;
-    let lookup_loopdevs =
-        lookup(ActivityConfig::with_str("/dev/loop0").artifact_out("paths", DEVICE_ARTIFACT_NAME))?;
-
-    let iostat = iostat(ActivityConfig::new().artifact_in("devices", DEVICE_ARTIFACT_NAME))?;
-
-    let fio = default_activities::launch_fio(vec![
-        String::from("--name=iouring-large-write-verify-loopdev-over-tmpfs"),
-        String::from("--ioengine=sync"),
-        String::from("--iodepth=1"),
-        String::from("--direct=1"),
-        String::from("--filename=/dev/loop0"),
-        String::from("--rw=readwrite"),
-        String::from("--blocksize=4K"),
-        String::from("--loops=1"),
-        String::from("--rate_iops=750"),
-        format!("--write_bw_log={BW_FILE_NAME}"),
-        format!("--write_iops_log={IOPS_FILE_NAME}"),
-        format!("--write_lat_log={LAT_FILE_NAME}"),
-        String::from("--log_avg_msec=500"),
-        String::from("--numjobs=2"),
-    ]);
-
-    let mut activities = [
-        (lookup_loopdevs, "loopdevs", None, None),
-        (mpstat, "mpstat", None, None),
-        (iostat, "iostat", None, None),
-        (netdev, "netdev", None, None),
-        (meminf, "meminfo", None, None),
-        (sleeper, "sleeper", None, None),
-        (
-            fio,
-            "fio",
-            None,
-            Some(format!("{BW_FILE_NAME}:{IOPS_FILE_NAME}:{LAT_FILE_NAME}")),
-        ),
-        (fgraph, "flamegraph", None, None),
-    ];
-
-    println!("starting scenario");
-    for item in &mut activities {
-        let res = item.0.start(&mut conn, &mut stor)?;
-        item.2 = res;
+    println!("Running pipeline");
+    for (name, activity) in &mut pipeline {
+        println!("starting '{name}'");
+        activity
+            .start(&mut conn, &stor)
+            .map_err(|e| format!("err ({name}): {e}"))?;
     }
 
-    println!("waiting the load to end");
+    println!("Waiting the load to end");
+    let mut postprocessing = vec![];
+    pipeline.reverse();
+    for (name, activity) in &mut pipeline {
+        println!("stopping {name}");
+        if let Some(id) = activity
+            .stop(&mut conn, &stor)
+            .map_err(|e| format!("error while stopping '{name}': {e}"))?
+        {
+            postprocessing.push((name, id));
+        }
+    }
+    postprocessing.reverse();
 
     conn.send(Request::StopAll)
         .map_err(|e| format!("failed to send Stop request: {e}"))?;
@@ -119,7 +165,7 @@ fn main_wrapper() -> Res<()> {
         .map_err(|e| format!("failed to recv Stop response: {e}"))?;
     match &recv {
         Response::StopAll(Ok(..)) => (),
-        Response::StopAll(Err(e)) => return emsg(&format!("failed to stop poll: {e}")),
+        Response::StopAll(Err(e)) => return Err(format!("failed to stop poll: {e}")),
         _ => unreachable!("bad protocol response for Stop request from agent"),
     };
 
@@ -131,7 +177,7 @@ fn main_wrapper() -> Res<()> {
         .map_err(|e| format!("failed to recv Collect response: {e}"))?;
     let data = match recv {
         Response::Collect(Ok(data)) => data,
-        Response::Collect(Err(e)) => return emsg(&format!("failed to collect results: {e}")),
+        Response::Collect(Err(e)) => return Err(format!("failed to collect results: {e}")),
         _ => unreachable!("bad protocol response for Collect request from agent"),
     };
 
@@ -144,13 +190,9 @@ fn main_wrapper() -> Res<()> {
 
     println!("Writing activity map");
     let mut f = File::create(output_path.join("out.map")).unwrap();
-    for (_, name, id, args) in activities {
-        let id = match id {
-            Some(id) => u32::from(id),
-            None => continue,
-        };
-
-        f.write_all(format!("{id:03} {name} {}\n", args.unwrap_or("".to_string())).as_bytes())
+    for (name, (id, hint)) in postprocessing {
+        let hint = hint.unwrap_or(String::new());
+        f.write_all(format!("{id:03} {name} {hint}\n").as_bytes())
             .unwrap();
     }
 

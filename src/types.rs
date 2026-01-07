@@ -21,15 +21,40 @@ pub enum ArtifactValue {
     StringList(Vec<String>),
 }
 
-// Keep in sync with ArtifactValue
-// TODO: remove code duplication by using some kind of macro
+// Keep in sync with ArtifactValue.
+// Or remove code duplication by using some kind of macro
 #[derive(Clone, Debug)]
 pub enum ArtifactValueType {
     StringList,
+}
+
+// .INI-file like structure
+#[derive(Clone, Debug, Default)]
+pub struct IniLike {
+    pub global: Vec<String>,
+    pub sections: Vec<(String, Vec<String>)>,
+}
+
+impl IniLike {
+    pub fn with_global(cfg: &[&str]) -> Self {
+        IniLike {
+            global: cfg.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        }
+    }
+
+    pub fn section(mut self, name: &str, cfg: &[&str]) -> Self {
+        self.sections.push((
+            name.to_string(),
+            cfg.iter().map(|s| s.to_string()).collect(),
+        ));
+        self
+    }
 }
 
 #[derive(Clone, Debug)]
 pub enum ConfigValue {
     String(String),
     Time(Duration),
+    Ini(IniLike),
 }

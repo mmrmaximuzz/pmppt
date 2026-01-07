@@ -18,7 +18,7 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset};
 
-use crate::common::{Res, emsg};
+use crate::common::Res;
 
 pub struct Meminfo {
     pub time: Vec<String>,
@@ -162,7 +162,7 @@ fn process_net_dev_chunks(chunks: &[&str]) -> Res<NetDev> {
                 .map(|s| s.parse::<u64>().unwrap())
                 .collect();
             if values.len() != 16 {
-                return emsg(&format!("bad value vector for /proc/net/dev {item}"));
+                return Err(format!("bad value vector for /proc/net/dev {item}"));
             }
 
             // extract last stats for this interface

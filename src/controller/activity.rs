@@ -14,12 +14,13 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+use std::fmt::Debug;
 use std::{collections::HashMap, time::Duration};
 
 use crate::{
     common::{Res, communication::Id},
     controller::storage::Storage,
-    types::ConfigValue,
+    types::{ConfigValue, IniLike},
 };
 
 use super::{configuration::Run, connection::ConnectionOps};
@@ -28,11 +29,20 @@ pub fn process_run(_run: &Run) -> Res<()> {
     Ok(())
 }
 
+// TODO: change String to more intelligent type
+pub type PlotHint = (Id, Option<String>);
+
 pub trait Activity {
-    fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &mut Storage) -> Res<Option<Id>>;
-    fn stop(&mut self, _conn: &mut dyn ConnectionOps) -> Res<()> {
+    fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<()>;
+    fn stop(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<Option<PlotHint>> {
         // by default stop is a noop
-        Ok(())
+        Ok(None)
+    }
+}
+
+impl Debug for dyn Activity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("Activity {:?}", &self as *const _))
     }
 }
 
@@ -80,6 +90,13 @@ impl ActivityConfig {
     pub fn with_str<T: AsRef<str>>(s: T) -> Self {
         Self {
             value: Some(ConfigValue::String(s.as_ref().to_string())),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_ini(ini: IniLike) -> Self {
+        Self {
+            value: Some(ConfigValue::Ini(ini)),
             ..Default::default()
         }
     }
@@ -168,7 +185,8 @@ impl ActivityConfig {
     }
 }
 
-pub type ActivityCreator = dyn Fn(ActivityConfig) -> Res<Box<dyn Activity>>;
+pub type ActivityCreatorFn = fn(ActivityConfig) -> Res<Box<dyn Activity>>;
+pub type ActivityCreator = Box<dyn Fn(ActivityConfig) -> Res<Box<dyn Activity>>>;
 
 pub mod default_activities {
     use std::thread::sleep;
@@ -177,7 +195,7 @@ pub mod default_activities {
     use crate::common::Res;
     use crate::common::communication::Request::{self, Poll};
     use crate::common::communication::{Id, Response, SpawnMode};
-    use crate::controller::activity::ActivityConfig;
+    use crate::controller::activity::{ActivityConfig, PlotHint};
     use crate::controller::connection::ConnectionOps;
     use crate::controller::storage::Storage;
     use crate::types::{ArtifactValue, ConfigValue};
@@ -189,23 +207,24 @@ pub mod default_activities {
     }
 
     impl Activity for Sleeper {
-        fn start(&mut self, _conn: &mut dyn ConnectionOps, _stor: &mut Storage) -> Res<Option<Id>> {
+        fn start(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<()> {
             sleep(self.period);
-            Ok(None)
+            Ok(())
         }
     }
 
     pub fn sleeper_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
         if conf.has_artifacts() {
             return Err(format!(
-                "sleeper does not accept artifacts but got: {conf:?}"
+                "sleeper does not accept artifacts but got: input={:?}, output={:?}",
+                conf.input, conf.output
             ));
         }
 
         match conf.value {
             Some(ConfigValue::Time(period)) => Ok(Box::new(Sleeper { period })),
             other => Err(format!(
-                "sleeper expects just single UInt argument, got {other:?}"
+                "sleeper expects just single Time argument, got {other:?}"
             )),
         }
     }
@@ -216,33 +235,31 @@ pub mod default_activities {
     }
 
     impl Activity for Poller {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &mut Storage) -> Res<Option<Id>> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<()> {
             conn.send(Poll {
                 pattern: self.pattern.clone(),
             })
             .map_err(|e| format!("failed to send Poll for '{}': {e}", self.pattern))?;
 
-            match conn.recv().map_err(|e| {
+            self.id = match conn.recv().map_err(|e| {
                 format!(
                     "failed to get response for Poll for '{}': {e}",
                     self.pattern
                 )
             })? {
-                Response::Poll(Ok(id)) => {
-                    self.id = Some(id);
-                    Ok(Some(id))
-                }
+                Response::Poll(Ok(id)) => Some(id),
                 Response::Poll(Err(e)) => {
-                    Err(format!("failed to spawn Poll for '{}': {e}", self.pattern))
+                    return Err(format!("failed to spawn Poll for '{}': {e}", self.pattern));
                 }
                 other => unreachable!(
                     "protocol exception: got bad agent response for Poll '{}': {other:?}",
                     self.pattern
                 ),
-            }
+            };
+            Ok(())
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps) -> Res<()> {
+        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<Option<PlotHint>> {
             let id = match self.id {
                 Some(id) => id,
                 None => {
@@ -260,7 +277,7 @@ pub mod default_activities {
                 )
             })?;
 
-            match conn.recv().map_err(|e| {
+            let recv_id = match conn.recv().map_err(|e| {
                 format!(
                     "failed to get response for Stop request for '{}'(id={id}): {e}",
                     self.pattern
@@ -273,8 +290,10 @@ pub mod default_activities {
                     self.pattern
                 ),
             };
+            assert_eq!(id, recv_id);
 
-            Ok(())
+            // no special plot info for poller activities - the format is well-known
+            Ok(Some((id, None)))
         }
     }
 
@@ -310,10 +329,17 @@ pub mod default_activities {
         args: Vec<String>,
         mode: SpawnMode,
         id: Option<Id>,
+        hint: Option<Box<dyn Fn() -> String>>,
+    }
+
+    impl Launcher {
+        fn get_hint(&self) -> Option<String> {
+            self.hint.as_ref().map(|f| f().to_string())
+        }
     }
 
     impl Activity for Launcher {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &mut Storage) -> Res<Option<Id>> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<()> {
             conn.send(Request::Spawn {
                 cmd: self.comm.clone(),
                 args: self.args.clone(),
@@ -332,19 +358,29 @@ pub mod default_activities {
                     self.comm
                 )
             })? {
-                Response::SpawnFg(Ok(_)) => None, // TODO: use fg result
-                Response::SpawnFg(Err(e)) => {
-                    return Err(format!(
-                        "error in Launcher foreground spawn comm '{}': {e}",
-                        self.comm
-                    ));
+                Response::SpawnFg(res) => {
+                    assert_eq!(self.mode, SpawnMode::Foreground);
+                    match res {
+                        Ok((id, _, _)) => Some(id), // TODO: use out and err from FG process
+                        Err(e) => {
+                            return Err(format!(
+                                "error in Launcher foreground spawn comm '{}': {e}",
+                                self.comm
+                            ));
+                        }
+                    }
                 }
-                Response::SpawnBg(Ok(id)) => Some(id),
-                Response::SpawnBg(Err(e)) => {
-                    return Err(format!(
-                        "error in Launcher background spawn comm '{}': {e}",
-                        self.comm
-                    ));
+                Response::SpawnBg(res) => {
+                    assert_ne!(self.mode, SpawnMode::Foreground);
+                    match res {
+                        Ok(id) => Some(id),
+                        Err(e) => {
+                            return Err(format!(
+                                "error in Launcher background spawn comm '{}': {e}",
+                                self.comm
+                            ));
+                        }
+                    }
                 }
                 other => unreachable!(
                     "protocol exception: got bad agent response for Launcher start with comm '{}': {other:?}",
@@ -352,13 +388,18 @@ pub mod default_activities {
                 ),
             };
 
-            Ok(self.id)
+            Ok(())
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps) -> Res<()> {
+        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<Option<PlotHint>> {
             match self.id {
-                None => Ok(()),
                 Some(id) => {
+                    // no need to stop foreground processes, they are stopped already
+                    if self.mode == SpawnMode::Foreground {
+                        // TODO: add ability to provide plotting hint
+                        return Ok(Some((id, self.get_hint())));
+                    }
+
                     conn.send(Request::Stop { id }).map_err(|e| {
                         format!(
                             "failed to send request for stop Launcher comm '{}': {e}",
@@ -374,7 +415,7 @@ pub mod default_activities {
                     })? {
                         Response::Stop(Ok(resp_id)) => {
                             assert_eq!(resp_id, id);
-                            Ok(())
+                            Ok(Some((id, self.get_hint())))
                         }
                         Response::Stop(Err(e)) => {
                             Err(format!("failed to stop Launcher comm '{}': {e}", self.comm))
@@ -385,6 +426,7 @@ pub mod default_activities {
                         ),
                     }
                 }
+                None => unreachable!(),
             }
         }
     }
@@ -399,28 +441,30 @@ pub mod default_activities {
             mode: SpawnMode::BackgroundKill,
             args: ["-P", "ALL", "1"].into_iter().map(String::from).collect(),
             id: None,
+            hint: None,
         }))
     }
 
     struct IostatLauncher {
         launcher: Launcher,
-        input: Option<String>,
+        devs_art_name: Option<String>,
     }
 
     impl Activity for IostatLauncher {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &mut Storage) -> Res<Option<Id>> {
-            if let Some(ref name) = self.input {
-                let items = match stor.get(name) {
-                    ArtifactValue::StringList(items) => items,
+        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<()> {
+            if let Some(ref name) = self.devs_art_name {
+                #[expect(clippy::infallible_destructuring_match)]
+                let devices = match stor.get(name) {
+                    ArtifactValue::StringList(devices) => devices,
                 };
                 // extend default iostat launcher with custom device paths
-                self.launcher.args.extend_from_slice(&items);
+                self.launcher.args.extend_from_slice(&devices);
             }
             self.launcher.start(conn, stor)
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps) -> Res<()> {
-            self.launcher.stop(conn)
+        fn stop(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<Option<PlotHint>> {
+            self.launcher.stop(conn, stor)
         }
     }
 
@@ -447,18 +491,74 @@ pub mod default_activities {
                     .map(String::from)
                     .collect(),
                 id: None,
+                hint: None,
             },
-            input: devs_art_name,
+            devs_art_name,
         }))
     }
 
-    pub fn launch_fio(cfg: Vec<String>) -> Box<dyn Activity> {
-        Box::new(Launcher {
+    pub fn fio_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+        let fiocfg = match conf.value {
+            Some(ConfigValue::Ini(ini)) => ini,
+            None => return Err("fio expects configuration value, but got none".to_string()),
+            other => {
+                return Err(format!(
+                    "fio expects INI-like configuration value, but got: {other:?}"
+                ));
+            }
+        };
+
+        if fiocfg.sections.is_empty() {
+            return Err("fio expects at least one section to run".to_string());
+        }
+
+        let mut args: Vec<String> = fiocfg.global.iter().map(|s| format!("--{s}")).collect();
+        let mut bw_hint = vec![];
+        let mut iops_hint = vec![];
+        let mut lat_hint = vec![];
+
+        for (name, config) in fiocfg.sections {
+            args.push(format!("--name={name}"));
+            for line in &config {
+                args.push(format!("--{line}"));
+
+                // select the right hint to update
+                let hint = if line.starts_with("write_bw_log=") {
+                    &mut bw_hint
+                } else if line.starts_with("write_iops_log=") {
+                    &mut iops_hint
+                } else if line.starts_with("write_lat_log=") {
+                    &mut lat_hint
+                } else {
+                    continue;
+                };
+                hint.push(line.split_once("=").unwrap().1.to_string());
+            }
+            args.extend_from_slice(
+                &config
+                    .iter()
+                    .map(|s| format!("--{s}"))
+                    .collect::<Vec<String>>(),
+            );
+        }
+
+        Ok(Box::new(Launcher {
             comm: String::from("fio"),
             mode: SpawnMode::BackgroundWait,
-            args: cfg,
+            args,
             id: None,
-        })
+            hint: if bw_hint.is_empty() && iops_hint.is_empty() && lat_hint.is_empty() {
+                None
+            } else {
+                Some(Box::new(move || {
+                    [&bw_hint, &iops_hint, &lat_hint]
+                        .iter()
+                        .map(|h| h.join(":"))
+                        .collect::<Vec<String>>()
+                        .join(",")
+                }))
+            },
+        }))
     }
 
     pub fn flamegraph_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
@@ -474,6 +574,7 @@ pub mod default_activities {
                 .map(String::from)
                 .collect(),
             id: None,
+            hint: Some(Box::new(|| String::from("flamegraph.svg"))),
         }))
     }
 
@@ -483,7 +584,7 @@ pub mod default_activities {
     }
 
     impl Activity for LookupPaths {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &mut Storage) -> Res<Option<Id>> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<()> {
             conn.send(Request::LookupPaths {
                 pattern: self.pattern.clone(),
             })
@@ -503,7 +604,7 @@ pub mod default_activities {
                 .collect();
 
             stor.set(&self.out_paths, ArtifactValue::StringList(paths));
-            Ok(None)
+            Ok(())
         }
     }
 

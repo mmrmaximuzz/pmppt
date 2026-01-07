@@ -266,6 +266,7 @@ fn read_mapping(path: &Path) -> Res<Vec<PlotInfo>> {
             "netdev" => "poll.log",
             "meminfo" => "poll.log",
             "fio" => "out.log",
+            "flamegraph" => "out.log",
             _ => continue,
         };
         res.push((
@@ -280,7 +281,7 @@ fn read_mapping(path: &Path) -> Res<Vec<PlotInfo>> {
 
 fn process_dir(outdir: PathBuf) -> Res<()> {
     if !outdir.is_dir() {
-        return emsg(&format!("{outdir:?} is not a directory"));
+        return Err(format!("{outdir:?} is not a directory"));
     }
 
     let plotdir = TempDir::new_in(&outdir, "plotter")
@@ -311,6 +312,15 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
                 if let Some(opts) = options {
                     fio::process(&content, &plotdir.path().join(datadir), &opts)
                         .write_html(outfile);
+                }
+            }
+            "flamegraph" => {
+                if let Some(svgpath) = options {
+                    std::fs::rename(
+                        plotdir.path().join(datadir).join(&svgpath),
+                        outdir.join(&svgpath),
+                    )
+                    .unwrap();
                 }
             }
             _ => unreachable!("{name}"),

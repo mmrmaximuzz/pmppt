@@ -39,7 +39,7 @@ pub enum Request {
     Abort,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum SpawnMode {
     Foreground,
     BackgroundWait,
@@ -49,7 +49,7 @@ pub enum SpawnMode {
 #[derive(Debug, Clone, Copy, PartialEq, Hash, Eq)]
 pub struct Id(u32);
 pub type IdOrError = Result<Id, String>;
-pub type OutOrError = Result<(Vec<u8>, Vec<u8>), String>;
+pub type OutOrError = Result<(Id, Vec<u8>, Vec<u8>), String>;
 pub type UnitOrError = Result<(), String>;
 pub type DataOrError = Result<Vec<u8>, String>;
 pub type PathsOrError = Result<Vec<PathBuf>, String>;

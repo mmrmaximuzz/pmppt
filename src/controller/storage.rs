@@ -27,21 +27,20 @@ pub struct Storage {
 }
 
 impl Storage {
-    pub fn set(&mut self, key: &str, val: ArtifactValue) {
+    pub fn set(&self, key: &str, val: ArtifactValue) {
         let mut stor = self.stor.lock().unwrap();
         let res = stor.insert(key.to_string(), val);
 
-        assert!(
-            res.is_none(),
-            "TODO: must be guaranteed by storage verification"
-        );
+        // TODO: implement storage verification
+        assert!(res.is_none(), "artifact with key {key} already existied");
     }
 
     pub fn get(&self, key: &str) -> ArtifactValue {
         let stor = self.stor.lock().unwrap();
+        // TODO: implement storage verification
         let val = stor
             .get(key)
-            .expect("TODO: validate key existence by external verificator");
+            .unwrap_or_else(|| panic!("failed to get artifact by key '{key}'"));
         (*val).clone()
     }
 }
