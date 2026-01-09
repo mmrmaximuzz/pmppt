@@ -20,7 +20,7 @@ use std::{collections::HashMap, env, fs::File, io::Write, path::PathBuf, time::D
 
 use pmppt::{
     common::{
-        Res,
+        Result,
         communication::{Request, Response},
     },
     controller::{
@@ -31,7 +31,7 @@ use pmppt::{
     types::IniLike,
 };
 
-fn create_connection(endpoint: &str) -> Res<impl ConnectionOps> {
+fn create_connection(endpoint: &str) -> Result<impl ConnectionOps> {
     use pmppt::controller::connection::tcpmsgpack::TcpMsgpackConnection;
     TcpMsgpackConnection::from_endpoint(endpoint)
 }
@@ -59,7 +59,7 @@ fn collect_activity_database() -> ActivityDatabase {
     db
 }
 
-fn configure_pipeline(db: &ActivityDatabase) -> Res<Vec<(String, Box<dyn Activity>)>> {
+fn configure_pipeline(db: &ActivityDatabase) -> Result<Vec<(String, Box<dyn Activity>)>> {
     let pipeline_info = [
         ("mpstat", ActivityConfig::new()),
         ("netdev", ActivityConfig::new()),
@@ -118,7 +118,7 @@ fn configure_pipeline(db: &ActivityDatabase) -> Res<Vec<(String, Box<dyn Activit
     Ok(pipeline)
 }
 
-fn main_wrapper() -> Res<()> {
+fn main_wrapper() -> Result<()> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 3 {
         return Err(format!("usage: {} IPADDR:PORT OUTPUT_ARCHIVE", args[0]));

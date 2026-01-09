@@ -17,11 +17,11 @@
 use std::{collections::HashMap, net::TcpStream};
 
 use crate::common::{
-    Res,
+    Result,
     communication::{Request, Response},
 };
 
-use super::configuration::{AgentConfig, AgentId};
+use super::cfgparse::{AgentConfig, AgentId};
 
 pub struct Connection {
     _sock: TcpStream,
@@ -29,7 +29,7 @@ pub struct Connection {
 
 pub type Connections = HashMap<AgentId, Connection>;
 
-pub fn connect_agents(cfg: &HashMap<AgentId, AgentConfig>) -> Res<Connections> {
+pub fn connect_agents(cfg: &HashMap<AgentId, AgentConfig>) -> Result<Connections> {
     let mut conns = HashMap::default();
     for (name, params) in cfg {
         let ip = params.ip;
@@ -57,7 +57,7 @@ pub mod tcpmsgpack {
     use serde::Serialize;
 
     use crate::common::{
-        Res,
+        Result,
         communication::{self, Request, Response},
         emsg, msgpack_impl,
     };
@@ -69,7 +69,7 @@ pub mod tcpmsgpack {
     }
 
     impl TcpMsgpackConnection {
-        pub fn from_endpoint(endpoint: &str) -> Res<Self> {
+        pub fn from_endpoint(endpoint: &str) -> Result<Self> {
             Ok(Self {
                 conn: TcpStream::connect(endpoint)
                     .map_err(|e| format!("failed to connect to agent {endpoint}: {e}"))?,
@@ -78,7 +78,7 @@ pub mod tcpmsgpack {
     }
 
     impl ConnectionOps for TcpMsgpackConnection {
-        fn send(&mut self, req: Request) -> Res<()> {
+        fn send(&mut self, req: Request) -> Result<()> {
             let mut msg_buf = vec![];
             let msg = msgpack_impl::Request::from(req);
             msg.serialize(&mut Serializer::new(&mut msg_buf)).unwrap(); // cannot fail
@@ -94,7 +94,7 @@ pub mod tcpmsgpack {
             Ok(())
         }
 
-        fn recv(&mut self) -> Res<Response> {
+        fn recv(&mut self) -> Result<Response> {
             let msg_size = u32::from_le_bytes({
                 let mut msg_size = [0u8; 4];
                 self.conn

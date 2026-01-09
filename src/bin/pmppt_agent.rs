@@ -23,10 +23,10 @@ use env_logger::Env;
 use log::{error, info};
 
 use pmppt::agent::Agent;
-use pmppt::common::Res;
+use pmppt::common::Result;
 use pmppt::common::emsg;
 
-fn find_max_numeric_dir(base: &Path) -> Res<u32> {
+fn find_max_numeric_dir(base: &Path) -> Result<u32> {
     let mut max_dir = 0;
 
     for dir in base
@@ -44,7 +44,7 @@ fn find_max_numeric_dir(base: &Path) -> Res<u32> {
     Ok(max_dir)
 }
 
-fn create_outdir(base: &Path) -> Res<PathBuf> {
+fn create_outdir(base: &Path) -> Result<PathBuf> {
     if base.exists() && !base.is_dir() {
         return Err(format!("path provided '{base:?}' is not a directory"));
     }
@@ -61,7 +61,7 @@ fn create_outdir(base: &Path) -> Res<PathBuf> {
     Ok(new_dir)
 }
 
-fn main_selfhosted(args: &[String]) -> Res<()> {
+fn main_selfhosted(args: &[String]) -> Result<()> {
     use pmppt::agent::proto_impl::selfhosted;
 
     if args.len() != 2 {
@@ -84,7 +84,7 @@ fn main_selfhosted(args: &[String]) -> Res<()> {
     Ok(())
 }
 
-fn main_tcp_msgpack(args: &[String]) -> Res<()> {
+fn main_tcp_msgpack(args: &[String]) -> Result<()> {
     use pmppt::agent::proto_impl::tcpmsgpack;
 
     if args.len() != 2 {
@@ -117,7 +117,7 @@ fn main_tcp_msgpack(args: &[String]) -> Res<()> {
     }
 }
 
-fn main_wrapper(args: &[String]) -> Res<()> {
+fn main_wrapper(args: &[String]) -> Result<()> {
     // init log with Info level by default
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     info!("pmppt-agent starting");

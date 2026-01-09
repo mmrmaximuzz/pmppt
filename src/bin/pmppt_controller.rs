@@ -17,8 +17,8 @@
 use std::{env, fs::File, io::Read, path::PathBuf, str::FromStr};
 
 use pmppt::{
-    common::Res,
-    controller::{activity, configuration, connection},
+    common::Result,
+    controller::{activity, cfgparse, connection},
 };
 
 fn main() {
@@ -28,14 +28,14 @@ fn main() {
     }
 }
 
-fn main_wrapper() -> Res<()> {
+fn main_wrapper() -> Result<()> {
     let config_path_str = parse_cli_args()?;
     let config_str = read_config_file(config_path_str)?;
-    let cfg = configuration::parse_config(&config_str)?;
+    let cfg = cfgparse::parse_config(&config_str)?;
     run(cfg)
 }
 
-fn parse_cli_args() -> Res<String> {
+fn parse_cli_args() -> Result<String> {
     let args: Vec<String> = env::args().collect();
     if args.len() != 2 {
         return Err(format!("usage: {} PATH_TO_CONFIG", args[0]));
@@ -44,7 +44,7 @@ fn parse_cli_args() -> Res<String> {
     Ok(args[1].clone())
 }
 
-fn read_config_file(pathstr: String) -> Res<String> {
+fn read_config_file(pathstr: String) -> Result<String> {
     let config_path =
         PathBuf::from_str(&pathstr).map_err(|e| format!("bad path provided '{pathstr}: {e}"))?;
 
@@ -58,7 +58,7 @@ fn read_config_file(pathstr: String) -> Res<String> {
     Ok(config)
 }
 
-fn run(cfg: configuration::Config) -> Res<()> {
+fn run(cfg: cfgparse::Config) -> Result<()> {
     println!("{cfg:?}");
     activity::process_run(&cfg.run)?;
     connection::connect_agents(&cfg.setup.agents)?;

@@ -25,7 +25,7 @@ use serde::Serialize;
 use subprocess::Exec;
 use tempdir::TempDir;
 
-use pmppt::common::{Res, emsg};
+use pmppt::common::{Result, emsg};
 use pmppt::plotters::procfs::{Meminfo, NetDev};
 use pmppt::plotters::sysstat::iostat::Iostat;
 use pmppt::plotters::sysstat::mpstat::Mpstat;
@@ -36,7 +36,7 @@ use pmppt::plotters::{fio, procfs, sysstat};
 struct MyDateTime(NaiveDateTime);
 
 impl Serialize for MyDateTime {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
@@ -238,7 +238,7 @@ fn plot_iostat(iostat: Iostat) -> Plot {
     plot
 }
 
-fn readfile(path: &Path) -> Res<String> {
+fn readfile(path: &Path) -> Result<String> {
     use std::io::Read;
 
     let mut buf = String::with_capacity(32 * 1024);
@@ -251,7 +251,7 @@ fn readfile(path: &Path) -> Res<String> {
 
 type PlotInfo = (String, String, String, Option<String>);
 
-fn read_mapping(path: &Path) -> Res<Vec<PlotInfo>> {
+fn read_mapping(path: &Path) -> Result<Vec<PlotInfo>> {
     let content = readfile(path)?;
 
     let mut res = vec![];
@@ -279,7 +279,7 @@ fn read_mapping(path: &Path) -> Res<Vec<PlotInfo>> {
     Ok(res)
 }
 
-fn process_dir(outdir: PathBuf) -> Res<()> {
+fn process_dir(outdir: PathBuf) -> Result<()> {
     if !outdir.is_dir() {
         return Err(format!("{outdir:?} is not a directory"));
     }
@@ -330,7 +330,7 @@ fn process_dir(outdir: PathBuf) -> Res<()> {
     Ok(())
 }
 
-fn main_wrapper(args: &[String]) -> Res<()> {
+fn main_wrapper(args: &[String]) -> Result<()> {
     if args.len() != 2 {
         return emsg("usage: PROG PATH_TO_OUTPUT");
     }

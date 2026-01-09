@@ -17,10 +17,10 @@
 pub mod communication;
 pub mod msgpack_impl;
 
-pub type PmpptErr = String;
-pub type Res<T> = Result<T, PmpptErr>;
+/// Use simple text descriptions as error typoe for all the errors in PMPPT.
+pub type Result<T> = std::result::Result<T, String>;
 
 /// Little helper function to convert str literals to error message.
-pub fn emsg<T, U: AsRef<str>>(s: U) -> Res<T> {
+pub fn emsg<T, U: AsRef<str>>(s: U) -> Result<T> {
     Err(s.as_ref().to_string())
 }

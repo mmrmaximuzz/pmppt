@@ -32,7 +32,7 @@ use std::{
 use log::{error, info, warn};
 use subprocess::{Exec, Popen};
 
-use crate::common::Res;
+use crate::common::Result;
 use crate::common::communication::{Id, IdOrError, OutOrError, Request, Response, SpawnMode};
 
 /// Generic transport protocol interface.
@@ -235,7 +235,7 @@ where
         }
     }
 
-    fn lookup_paths(pattern: &str) -> Res<Vec<PathBuf>> {
+    fn lookup_paths(pattern: &str) -> Result<Vec<PathBuf>> {
         let mut paths = Vec::default();
 
         // expand braces and interpret each expansion as a glob

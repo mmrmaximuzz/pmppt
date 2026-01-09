@@ -14,22 +14,22 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use crate::common::Res;
+use crate::common::Result;
 
-fn split_header(content: &str) -> Res<(&str, &str)> {
+fn split_header(content: &str) -> Result<(&str, &str)> {
     let (header, rest) = content.split_once('\n').ok_or("header issue")?;
     Ok((header.trim(), rest.trim()))
 }
 
-fn split_chunks(content: &str) -> Res<Vec<&str>> {
+fn split_chunks(content: &str) -> Result<Vec<&str>> {
     split_chunks_custom(content, "\n\n")
 }
 
-fn split_chunks_iostat(content: &str) -> Res<Vec<&str>> {
+fn split_chunks_iostat(content: &str) -> Result<Vec<&str>> {
     split_chunks_custom(content, "\n\n\n")
 }
 
-fn split_chunks_custom<'a>(content: &'a str, pattern: &str) -> Res<Vec<&'a str>> {
+fn split_chunks_custom<'a>(content: &'a str, pattern: &str) -> Result<Vec<&'a str>> {
     // remove the last entry of mpstat, it is not useful for us
     let (chunks, _) = content.rsplit_once(pattern).ok_or("not enough records")?;
 
@@ -42,7 +42,7 @@ pub mod mpstat {
     use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 
     use crate::{
-        common::Res,
+        common::Result,
         plotters::sysstat::{split_chunks, split_header},
     };
 
@@ -52,14 +52,14 @@ pub mod mpstat {
         nr_cpus: usize,
     }
 
-    pub fn parse(content: &str) -> Res<Mpstat> {
+    pub fn parse(content: &str) -> Result<Mpstat> {
         let (header, rest) = split_header(content)?;
         let header = parse_mpstat_header(header)?;
         let chunks = split_chunks(rest)?;
         process_chunks(chunks, header)
     }
 
-    fn parse_mpstat_header(hdr: &str) -> Res<MpstatHeader> {
+    fn parse_mpstat_header(hdr: &str) -> Result<MpstatHeader> {
         let parts: Vec<&str> = hdr.split_ascii_whitespace().collect();
         let kernel = parts[1].to_string();
         let datestr = parts[3];
@@ -110,7 +110,7 @@ pub mod mpstat {
         }
     }
 
-    fn initialize_column_map(chunks: &[&str]) -> Res<Vec<Option<MpstatColumn>>> {
+    fn initialize_column_map(chunks: &[&str]) -> Result<Vec<Option<MpstatColumn>>> {
         let first = chunks[0];
         let col_line = first
             .lines()
@@ -143,11 +143,11 @@ pub mod mpstat {
         pub nr_cpus: usize,
     }
 
-    fn get_cell<T: Copy>(cell: &OnceCell<T>) -> Res<T> {
+    fn get_cell<T: Copy>(cell: &OnceCell<T>) -> Result<T> {
         Ok(*cell.get().ok_or("cannot get once cell".to_string())?)
     }
 
-    fn process_chunks(chunks: Vec<&str>, header: MpstatHeader) -> Res<Mpstat> {
+    fn process_chunks(chunks: Vec<&str>, header: MpstatHeader) -> Result<Mpstat> {
         let colmap = initialize_column_map(&chunks)?;
         let mut stat = Mpstat {
             kernel: header.kernel,
@@ -287,7 +287,7 @@ pub mod iostat {
 
     use chrono::NaiveDateTime;
 
-    use crate::common::Res;
+    use crate::common::Result;
 
     use super::{split_chunks_iostat, split_header};
 
@@ -326,7 +326,7 @@ pub mod iostat {
         pub stats: HashMap<String, Vec<f64>>,
     }
 
-    pub fn parse(content: &str) -> Res<Iostat> {
+    pub fn parse(content: &str) -> Result<Iostat> {
         let mut iostat = Iostat::default();
 
         let (_, content) = split_header(content)?; // we dont need iostat header

@@ -18,14 +18,14 @@ use std::fmt::Debug;
 use std::{collections::HashMap, time::Duration};
 
 use crate::{
-    common::{Res, communication::Id},
+    common::{Result, communication::Id},
     controller::storage::Storage,
     types::{ConfigValue, IniLike},
 };
 
-use super::{configuration::Run, connection::ConnectionOps};
+use super::{cfgparse::Run, connection::ConnectionOps};
 
-pub fn process_run(_run: &Run) -> Res<()> {
+pub fn process_run(_run: &Run) -> Result<()> {
     Ok(())
 }
 
@@ -33,8 +33,8 @@ pub fn process_run(_run: &Run) -> Res<()> {
 pub type PlotHint = (Id, Option<String>);
 
 pub trait Activity {
-    fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<()>;
-    fn stop(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<Option<PlotHint>> {
+    fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<()>;
+    fn stop(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<Option<PlotHint>> {
         // by default stop is a noop
         Ok(None)
     }
@@ -134,7 +134,7 @@ impl ActivityConfig {
     fn verify_single_artifact(
         bind: &Option<ArtifactNameBinding>,
         expected_name: &str,
-    ) -> Res<String> {
+    ) -> Result<String> {
         let (art_name, bind_name) = match bind {
             Some(output) => {
                 let items: Vec<_> = output.iter().collect();
@@ -168,15 +168,15 @@ impl ActivityConfig {
         Ok(bind_name.to_string())
     }
 
-    pub fn verify_single_artifact_in(&self, name: &str) -> Res<String> {
+    pub fn verify_single_artifact_in(&self, name: &str) -> Result<String> {
         Self::verify_single_artifact(&self.input, name)
     }
 
-    pub fn verify_single_artifact_out(&self, name: &str) -> Res<String> {
+    pub fn verify_single_artifact_out(&self, name: &str) -> Result<String> {
         Self::verify_single_artifact(&self.output, name)
     }
 
-    pub fn verify_optional_single_artifact_in(&self, name: &str) -> Res<Option<String>> {
+    pub fn verify_optional_single_artifact_in(&self, name: &str) -> Result<Option<String>> {
         if self.input.is_none() {
             Ok(None)
         } else {
@@ -185,14 +185,14 @@ impl ActivityConfig {
     }
 }
 
-pub type ActivityCreatorFn = fn(ActivityConfig) -> Res<Box<dyn Activity>>;
-pub type ActivityCreator = Box<dyn Fn(ActivityConfig) -> Res<Box<dyn Activity>>>;
+pub type ActivityCreatorFn = fn(ActivityConfig) -> Result<Box<dyn Activity>>;
+pub type ActivityCreator = Box<dyn Fn(ActivityConfig) -> Result<Box<dyn Activity>>>;
 
 pub mod default_activities {
     use std::thread::sleep;
     use std::time::Duration;
 
-    use crate::common::Res;
+    use crate::common::Result;
     use crate::common::communication::Request::{self, Poll};
     use crate::common::communication::{Id, Response, SpawnMode};
     use crate::controller::activity::{ActivityConfig, PlotHint};
@@ -207,13 +207,13 @@ pub mod default_activities {
     }
 
     impl Activity for Sleeper {
-        fn start(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<()> {
+        fn start(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<()> {
             sleep(self.period);
             Ok(())
         }
     }
 
-    pub fn sleeper_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn sleeper_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         if conf.has_artifacts() {
             return Err(format!(
                 "sleeper does not accept artifacts but got: input={:?}, output={:?}",
@@ -235,7 +235,7 @@ pub mod default_activities {
     }
 
     impl Activity for Poller {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<()> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<()> {
             conn.send(Poll {
                 pattern: self.pattern.clone(),
             })
@@ -259,7 +259,7 @@ pub mod default_activities {
             Ok(())
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<Option<PlotHint>> {
+        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<Option<PlotHint>> {
             let id = match self.id {
                 Some(id) => id,
                 None => {
@@ -306,7 +306,7 @@ pub mod default_activities {
         }
     }
 
-    pub fn proc_meminfo_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn proc_meminfo_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         if !conf.is_empty() {
             return Err(format!(
                 "meminfo poller expects no config, but got: {conf:?}"
@@ -315,7 +315,7 @@ pub mod default_activities {
         Ok(Box::new(Poller::create("/proc/meminfo")))
     }
 
-    pub fn proc_net_dev_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn proc_net_dev_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         if !conf.is_empty() {
             return Err(format!(
                 "net_dev poller expects no config, but got: {conf:?}"
@@ -339,7 +339,7 @@ pub mod default_activities {
     }
 
     impl Activity for Launcher {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<()> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<()> {
             conn.send(Request::Spawn {
                 cmd: self.comm.clone(),
                 args: self.args.clone(),
@@ -391,7 +391,7 @@ pub mod default_activities {
             Ok(())
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Res<Option<PlotHint>> {
+        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<Option<PlotHint>> {
             match self.id {
                 Some(id) => {
                     // no need to stop foreground processes, they are stopped already
@@ -431,7 +431,7 @@ pub mod default_activities {
         }
     }
 
-    pub fn mpstat_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn mpstat_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         if !conf.is_empty() {
             return Err(format!("mpstat accepts empty config, but got {conf:?}"));
         }
@@ -451,7 +451,7 @@ pub mod default_activities {
     }
 
     impl Activity for IostatLauncher {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<()> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<()> {
             if let Some(ref name) = self.devs_art_name {
                 #[expect(clippy::infallible_destructuring_match)]
                 let devices = match stor.get(name) {
@@ -463,12 +463,12 @@ pub mod default_activities {
             self.launcher.start(conn, stor)
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<Option<PlotHint>> {
+        fn stop(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<Option<PlotHint>> {
             self.launcher.stop(conn, stor)
         }
     }
 
-    pub fn iostat_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn iostat_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         if conf.has_value() {
             return Err(format!("iostat expect no value, but got {:?}", conf.value));
         }
@@ -497,7 +497,7 @@ pub mod default_activities {
         }))
     }
 
-    pub fn fio_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn fio_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         let fiocfg = match conf.value {
             Some(ConfigValue::Ini(ini)) => ini,
             None => return Err("fio expects configuration value, but got none".to_string()),
@@ -561,7 +561,7 @@ pub mod default_activities {
         }))
     }
 
-    pub fn flamegraph_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn flamegraph_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         if !conf.is_empty() {
             return Err(format!("flamegraph expects no config, but got: {conf:?}"));
         }
@@ -584,7 +584,7 @@ pub mod default_activities {
     }
 
     impl Activity for LookupPaths {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Res<()> {
+        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<()> {
             conn.send(Request::LookupPaths {
                 pattern: self.pattern.clone(),
             })
@@ -608,7 +608,7 @@ pub mod default_activities {
         }
     }
 
-    pub fn lookup_creator(conf: ActivityConfig) -> Res<Box<dyn Activity>> {
+    pub fn lookup_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
         if conf.has_artifacts_in() {
             return Err(format!(
                 "lookup expects no input artifacts but got: {:?}",

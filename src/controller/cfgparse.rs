@@ -19,7 +19,7 @@ use std::{collections::HashMap, net::IpAddr};
 use serde::Deserialize;
 use serde_yml;
 
-use crate::common::Res;
+use crate::common::Result;
 
 pub type AgentId = String;
 
@@ -36,6 +36,12 @@ pub struct Setup {
     pub params: Option<HashMap<String, serde_yml::Value>>,
 }
 
+pub type Run = Vec<HashMap<StageName, HashMap<AgentId, ActivityChain>>>;
+
+pub type AgentId = String;
+pub type StageName = String;
+pub type ActivityName = String;
+
 #[derive(Deserialize, Debug)]
 pub struct AgentConfig {
     pub ip: IpAddr,
@@ -47,7 +53,7 @@ pub struct RunStage {}
 
 pub type Run = Vec<HashMap<AgentId, RunStage>>;
 
-pub fn parse_config(config_str: &str) -> Res<Config> {
+pub fn parse_config(config_str: &str) -> Result<Config> {
     serde_yml::from_str(config_str).map_err(|e| format!("failed to parse config file: {e}"))?
 }
 

@@ -18,14 +18,14 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset};
 
-use crate::common::Res;
+use crate::common::Result;
 
 pub struct Meminfo {
     pub time: Vec<String>,
     pub items: HashMap<String, Vec<f64>>,
 }
 
-fn cut_poller_header(content: &str) -> Res<&str> {
+fn cut_poller_header(content: &str) -> Result<&str> {
     let (_, data) = content.split_once("\n").ok_or("failed to cut header")?;
     Ok(data.trim_ascii())
 }
@@ -63,7 +63,7 @@ fn remove_nonchanging_data<T: PartialEq>(map: &mut HashMap<String, Vec<T>>) {
     }
 }
 
-fn handle_chunk(chunk: &str) -> Res<(String, DateTime<FixedOffset>, impl Iterator<Item = &str>)> {
+fn handle_chunk(chunk: &str) -> Result<(String, DateTime<FixedOffset>, impl Iterator<Item = &str>)> {
     let (timeline, data) = chunk
         .split_once("\n")
         .ok_or_else(|| format!("bad chunk: {chunk}"))?;
@@ -74,7 +74,7 @@ fn handle_chunk(chunk: &str) -> Res<(String, DateTime<FixedOffset>, impl Iterato
     Ok((timeline.to_string(), tstamp, data.split("\n")))
 }
 
-fn process_meminfo_chunks(chunks: &[&str]) -> Res<Meminfo> {
+fn process_meminfo_chunks(chunks: &[&str]) -> Result<Meminfo> {
     let mut time = vec![];
     let mut map: HashMap<String, Vec<f64>> = HashMap::default();
 
@@ -113,7 +113,7 @@ fn process_meminfo_chunks(chunks: &[&str]) -> Res<Meminfo> {
     Ok(Meminfo { time, items: map })
 }
 
-pub fn parse_meminfo(content: &str) -> Res<Meminfo> {
+pub fn parse_meminfo(content: &str) -> Result<Meminfo> {
     let data = cut_poller_header(content)?;
     let chunks = to_chunks(data);
     process_meminfo_chunks(&chunks)
@@ -132,7 +132,7 @@ fn get_diff(old: &mut Option<u64>, newval: u64, dt: f64) -> f64 {
     }
 }
 
-fn process_net_dev_chunks(chunks: &[&str]) -> Res<NetDev> {
+fn process_net_dev_chunks(chunks: &[&str]) -> Result<NetDev> {
     let mut time = vec![];
     let mut bytes_stat: HashMap<String, Vec<f64>> = HashMap::default();
     let mut count_stat: HashMap<String, Vec<f64>> = HashMap::default();
@@ -223,7 +223,7 @@ fn process_net_dev_chunks(chunks: &[&str]) -> Res<NetDev> {
     })
 }
 
-pub fn parse_net_dev(content: &str) -> Res<NetDev> {
+pub fn parse_net_dev(content: &str) -> Result<NetDev> {
     let data = cut_poller_header(content)?;
     let chunks = to_chunks(data);
     process_net_dev_chunks(&chunks)

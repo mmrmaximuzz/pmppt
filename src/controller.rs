@@ -15,6 +15,6 @@
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 pub mod activity;
-pub mod configuration;
+pub mod cfgparse;
 pub mod connection;
 pub mod storage;
