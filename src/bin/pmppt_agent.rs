@@ -16,7 +16,6 @@
 
 use std::net::Ipv4Addr;
 use std::net::TcpListener;
-use std::path::Path;
 use std::path::PathBuf;
 
 use env_logger::Env;
@@ -25,41 +24,7 @@ use log::{error, info};
 use pmppt::agent::Agent;
 use pmppt::common::Result;
 use pmppt::common::emsg;
-
-fn find_max_numeric_dir(base: &Path) -> Result<u32> {
-    let mut max_dir = 0;
-
-    for dir in base
-        .read_dir()
-        .map_err(|e| format!("cannot read dir: {e}"))?
-        .flatten()
-    {
-        let name = dir.file_name();
-        match name.to_string_lossy().parse::<u32>() {
-            Ok(value) => max_dir = std::cmp::max(max_dir, value),
-            Err(_) => continue,
-        }
-    }
-
-    Ok(max_dir)
-}
-
-fn create_outdir(base: &Path) -> Result<PathBuf> {
-    if base.exists() && !base.is_dir() {
-        return Err(format!("path provided '{base:?}' is not a directory"));
-    }
-
-    let new_dir_num = if base.exists() {
-        find_max_numeric_dir(base)? + 1
-    } else {
-        0
-    };
-
-    let new_dir = base.join(Path::new(&new_dir_num.to_string()));
-    std::fs::create_dir_all(&new_dir).map_err(|e| format!("cannot create ouput dir {e}"))?;
-
-    Ok(new_dir)
-}
+use pmppt::common::create_next_numeric_dir_in;
 
 fn main_selfhosted(args: &[String]) -> Result<()> {
     use pmppt::agent::proto_impl::selfhosted;
@@ -70,7 +35,7 @@ fn main_selfhosted(args: &[String]) -> Result<()> {
 
     let json_path = &args[0];
     let logs_path = PathBuf::from(&args[1]);
-    let outdir = create_outdir(&logs_path)?;
+    let outdir = create_next_numeric_dir_in(&logs_path)?;
 
     info!("agent is in selfhosted mode with config: {json_path}");
     info!("output directory: {outdir:?}");
@@ -109,7 +74,7 @@ fn main_tcp_msgpack(args: &[String]) -> Result<()> {
             .map_err(|e| format!("TCP listen failed: {e}"))?;
         info!("got new connection from {from}");
 
-        let outdir = create_outdir(&logs_path)?;
+        let outdir = create_next_numeric_dir_in(&logs_path)?;
         let proto = tcpmsgpack::TcpMsgpackProtocol::from_conn(conn);
         let agent = Agent::new(proto, outdir.clone());
         agent.serve();

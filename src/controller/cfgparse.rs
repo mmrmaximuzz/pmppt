@@ -18,112 +18,194 @@ use std::{collections::HashMap, net::IpAddr};
 
 use serde::Deserialize;
 use serde_yml;
-
 use crate::common::Result;
 
-pub type AgentId = String;
+use super::activity::ActivityConfig;
 
-/// Main structure describing PMPPT launch
+/// Main structure describing just-parsed structure, may be incorrect for PMPPT run
 #[derive(Deserialize, Debug)]
-pub struct Config {
-    pub setup: Setup,
-    pub run: Run,
+#[serde(deny_unknown_fields)]
+pub struct RawConfig {
+    pub setup: RawSetupConfig,
+    pub runtime: RawRuntimeConfig,
 }
 
 #[derive(Deserialize, Debug)]
-pub struct Setup {
+#[serde(deny_unknown_fields)]
+pub struct RawSetupConfig {
     pub agents: HashMap<AgentId, AgentConfig>,
-    pub params: Option<HashMap<String, serde_yml::Value>>,
 }
-
-pub type Run = Vec<HashMap<StageName, HashMap<AgentId, ActivityChain>>>;
+pub type RawRuntimeConfig = Vec<HashMap<StageName, HashMap<AgentId, ActivityChain>>>;
 
 pub type AgentId = String;
-pub type StageName = String;
-pub type ActivityName = String;
-
 #[derive(Deserialize, Debug)]
+#[serde(deny_unknown_fields)]
 pub struct AgentConfig {
     pub ip: IpAddr,
     pub port: u16,
 }
 
+pub type StageName = String;
+pub type ActivityName = String;
+pub type ActivityChain = Vec<HashMap<ActivityName, RawActivityArgs>>;
 #[derive(Deserialize, Debug)]
-pub struct RunStage {}
+#[serde(deny_unknown_fields)]
+pub struct RawActivityArgs {
+    pub args: Option<serde_yml::Value>,
+    #[serde(rename="in")]
+    pub input: Option<HashMap<String, String>>,
+    #[serde(rename="out")]
+    pub output: Option<HashMap<String, String>>,
+}
 
-pub type Run = Vec<HashMap<AgentId, RunStage>>;
+pub type ActivityParser = Box<dyn Fn(RawActivityArgs) -> Result<ActivityConfig>>;
 
-pub fn parse_config(config_str: &str) -> Result<Config> {
-    serde_yml::from_str(config_str).map_err(|e| format!("failed to parse config file: {e}"))?
+pub fn parse_raw_config(s: &str) -> Result<RawConfig> {
+    serde_yml::from_str::<RawConfig>(s).map_err(|e| format!("failed to parse config: {e}"))
 }
 
 #[cfg(test)]
 mod test {
     use std::net::Ipv4Addr;
 
-    use super::parse_config;
+    use indoc::indoc;
+
+    use super::parse_raw_config;
 
     #[test]
-    fn must_not_accept_empty_content() {
-        let empty = "";
-        let Err(_) = parse_config(empty) else {
-            panic!("must not parse empty content")
-        };
+    fn must_not_accept_empty() {
+        let cfg = "";
+        parse_raw_config(cfg).unwrap_err();
     }
 
     #[test]
-    fn should_parse_trivial_config() {
-        let trivial = "
-        setup:\n
-          agents:\n
-        run:\n
-          - somestring:\n";
-        let cfg = parse_config(trivial).expect("failed to parse trivial config");
+    fn should_parse_trivial_simplest() {
+        let cfg = indoc! {"
+            setup:
+              agents:
+            runtime:
+        "};
+        let cfg = parse_raw_config(cfg).unwrap();
         assert!(cfg.setup.agents.is_empty());
-        assert_eq!(cfg.setup.params, None);
-        assert_eq!(cfg.run.len(), 1);
-        assert_eq!(cfg.run[0].len(), 1);
-        assert!(cfg.run[0].contains_key("somestring"));
+        assert_eq!(cfg.runtime.len(), 0);
     }
 
     #[test]
-    fn should_parse_ok_config() {
-        let trivial = "
-        setup:\n
-          agents:\n
-            a1:\n
-              ip: 127.0.0.1\n
-              port: 50000\n
-            a2:\n
-              ip: 127.0.0.1\n
-              port: 50001\n
-            a3:\n
-              ip: 127.0.0.1\n
-              port: 60000\n
-          params:\n
-            TEST_TIME_SECS: 600\n
-        run:\n
-          - a1:\n
-            a2:\n
-          - a3:\n";
-        let localhost = Ipv4Addr::new(127, 0, 0, 1);
+    fn should_not_parse_setup_extra_fields() {
+        let cfg = indoc! {"
+            setup:
+              agents:
+              extra_field:
+            runtime:
+        "};
+        parse_raw_config(cfg).unwrap_err();
+    }
 
-        let cfg = parse_config(trivial).expect("failed to parse minimal config");
-        let params = cfg.setup.params.expect("failed to parse 'params' section");
-        assert_eq!(cfg.setup.agents.len(), 3);
-        assert_eq!(cfg.setup.agents["a1"].ip, localhost);
-        assert_eq!(cfg.setup.agents["a2"].ip, localhost);
-        assert_eq!(cfg.setup.agents["a3"].ip, localhost);
-        assert_eq!(cfg.setup.agents["a1"].port, 50000);
-        assert_eq!(cfg.setup.agents["a2"].port, 50001);
-        assert_eq!(cfg.setup.agents["a3"].port, 60000);
-        assert_eq!(params.len(), 1);
-        assert_eq!(params["TEST_TIME_SECS"], 600);
-        assert_eq!(cfg.run.len(), 2);
-        assert_eq!(cfg.run[0].len(), 2);
-        assert_eq!(cfg.run[1].len(), 1);
-        assert!(cfg.run[0].contains_key("a1"));
-        assert!(cfg.run[0].contains_key("a2"));
-        assert!(cfg.run[1].contains_key("a3"));
+    #[test]
+    fn should_not_parse_agent_extra_fields() {
+        let cfg = indoc! {"
+            setup:
+              agents:
+                a0:
+                  ip: 127.0.0.1
+                  port: 50000
+                  extra: field
+            runtime:
+        "};
+        parse_raw_config(cfg).unwrap_err();
+    }
+
+    #[test]
+    fn should_parse_trivial_empty_stage() {
+        let cfg = indoc! {"
+            setup:
+              agents:
+            runtime:
+              - stage0:
+        "};
+        let cfg = parse_raw_config(cfg).expect("failed to parse");
+        assert!(cfg.setup.agents.is_empty());
+        assert_eq!(cfg.runtime.len(), 1);
+        assert_eq!(cfg.runtime[0].len(), 1);
+        assert!(cfg.runtime[0].contains_key("stage0"));
+        assert_eq!(cfg.runtime[0]["stage0"].len(), 0);
+    }
+
+    #[test]
+    fn should_parse_single_agent_empty_chain() {
+        let cfg = indoc! {"
+            setup:
+              agents:
+                a0:
+                  ip: 127.0.0.1
+                  port: 50000
+            runtime:
+              - stage0:
+                  a0:
+        "};
+        let cfg = parse_raw_config(cfg).expect("failed to parse");
+        assert!(cfg.setup.agents.contains_key("a0"));
+        assert_eq!(cfg.runtime.len(), 1);
+        assert_eq!(cfg.runtime[0].len(), 1);
+        assert!(cfg.runtime[0].contains_key("stage0"));
+    }
+
+    #[test]
+    fn should_parse_full_config() {
+        let cfg = indoc! {"
+            setup:
+              agents:
+                a1:
+                  ip: 127.0.0.1
+                  port: 50001
+                a2:
+                  ip: 127.0.0.1
+                  port: 50002
+            runtime:
+              - prepare:
+                  a1:
+                    - cpu:
+                    - memory:
+                  a2:
+                    - cpu:
+                    - memory:
+              - bench:
+                  a2:
+                    - get_info:
+                        out:
+                          output_artifact: ARTIFACT_NAME
+                    - bench_me:
+                        args:
+                          arg1: value1
+                          arg2: value2
+                        in:
+                          input_artifact: ARTIFACT_NAME
+              - prefinal:
+                  a1:
+                    - collect:
+                  a2:
+                    - collect:
+        "};
+        let cfg = parse_raw_config(cfg).expect("failed to parse");
+        assert_eq!(cfg.setup.agents.len(), 2);
+        assert_eq!(cfg.setup.agents["a1"].ip, Ipv4Addr::LOCALHOST);
+        assert_eq!(cfg.setup.agents["a2"].ip, Ipv4Addr::LOCALHOST);
+        assert_eq!(cfg.setup.agents["a1"].port, 50001);
+        assert_eq!(cfg.setup.agents["a2"].port, 50002);
+
+        assert_eq!(cfg.runtime.len(), 3);
+        assert_eq!(cfg.runtime[0].len(), 1);
+        assert_eq!(cfg.runtime[1].len(), 1);
+        assert_eq!(cfg.runtime[2].len(), 1);
+        assert!(cfg.runtime[0].contains_key("prepare"));
+        assert!(cfg.runtime[1].contains_key("bench"));
+        assert!(cfg.runtime[2].contains_key("prefinal"));
+
+        assert!(cfg.runtime[0]["prepare"].contains_key("a1"));
+        assert!(cfg.runtime[0]["prepare"].contains_key("a2"));
+        assert!(!cfg.runtime[1]["bench"].contains_key("a1"));
+        assert!(cfg.runtime[1]["bench"].contains_key("a2"));
+        assert!(cfg.runtime[2]["prefinal"].contains_key("a1"));
+        assert!(cfg.runtime[2]["prefinal"].contains_key("a2"));
     }
 }

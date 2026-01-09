@@ -23,9 +23,9 @@ use crate::{
     types::{ConfigValue, IniLike},
 };
 
-use super::{cfgparse::Run, connection::ConnectionOps};
+use super::{cfgparse::RawRuntimeConfig, connection::Connection};
 
-pub fn process_run(_run: &Run) -> Result<()> {
+pub fn process_run(_run: &RawRuntimeConfig) -> Result<()> {
     Ok(())
 }
 
@@ -33,8 +33,8 @@ pub fn process_run(_run: &Run) -> Result<()> {
 pub type PlotHint = (Id, Option<String>);
 
 pub trait Activity {
-    fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<()>;
-    fn stop(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<Option<PlotHint>> {
+    fn start(&mut self, conn: &mut dyn Connection, stor: &Storage) -> Result<()>;
+    fn stop(&mut self, _conn: &mut dyn Connection, _stor: &Storage) -> Result<Option<PlotHint>> {
         // by default stop is a noop
         Ok(None)
     }
@@ -196,7 +196,7 @@ pub mod default_activities {
     use crate::common::communication::Request::{self, Poll};
     use crate::common::communication::{Id, Response, SpawnMode};
     use crate::controller::activity::{ActivityConfig, PlotHint};
-    use crate::controller::connection::ConnectionOps;
+    use crate::controller::connection::Connection;
     use crate::controller::storage::Storage;
     use crate::types::{ArtifactValue, ConfigValue};
 
@@ -207,7 +207,7 @@ pub mod default_activities {
     }
 
     impl Activity for Sleeper {
-        fn start(&mut self, _conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<()> {
+        fn start(&mut self, _conn: &mut dyn Connection, _stor: &Storage) -> Result<()> {
             sleep(self.period);
             Ok(())
         }
@@ -235,7 +235,7 @@ pub mod default_activities {
     }
 
     impl Activity for Poller {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<()> {
+        fn start(&mut self, conn: &mut dyn Connection, _stor: &Storage) -> Result<()> {
             conn.send(Poll {
                 pattern: self.pattern.clone(),
             })
@@ -259,7 +259,7 @@ pub mod default_activities {
             Ok(())
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<Option<PlotHint>> {
+        fn stop(&mut self, conn: &mut dyn Connection, _stor: &Storage) -> Result<Option<PlotHint>> {
             let id = match self.id {
                 Some(id) => id,
                 None => {
@@ -339,7 +339,7 @@ pub mod default_activities {
     }
 
     impl Activity for Launcher {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<()> {
+        fn start(&mut self, conn: &mut dyn Connection, _stor: &Storage) -> Result<()> {
             conn.send(Request::Spawn {
                 cmd: self.comm.clone(),
                 args: self.args.clone(),
@@ -391,7 +391,7 @@ pub mod default_activities {
             Ok(())
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps, _stor: &Storage) -> Result<Option<PlotHint>> {
+        fn stop(&mut self, conn: &mut dyn Connection, _stor: &Storage) -> Result<Option<PlotHint>> {
             match self.id {
                 Some(id) => {
                     // no need to stop foreground processes, they are stopped already
@@ -451,7 +451,7 @@ pub mod default_activities {
     }
 
     impl Activity for IostatLauncher {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<()> {
+        fn start(&mut self, conn: &mut dyn Connection, stor: &Storage) -> Result<()> {
             if let Some(ref name) = self.devs_art_name {
                 #[expect(clippy::infallible_destructuring_match)]
                 let devices = match stor.get(name) {
@@ -463,7 +463,7 @@ pub mod default_activities {
             self.launcher.start(conn, stor)
         }
 
-        fn stop(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<Option<PlotHint>> {
+        fn stop(&mut self, conn: &mut dyn Connection, stor: &Storage) -> Result<Option<PlotHint>> {
             self.launcher.stop(conn, stor)
         }
     }
@@ -584,7 +584,7 @@ pub mod default_activities {
     }
 
     impl Activity for LookupPaths {
-        fn start(&mut self, conn: &mut dyn ConnectionOps, stor: &Storage) -> Result<()> {
+        fn start(&mut self, conn: &mut dyn Connection, stor: &Storage) -> Result<()> {
             conn.send(Request::LookupPaths {
                 pattern: self.pattern.clone(),
             })

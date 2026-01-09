@@ -25,13 +25,13 @@ use pmppt::{
     },
     controller::{
         activity::{Activity, ActivityConfig, ActivityCreator, ActivityCreatorFn},
-        connection::ConnectionOps,
+        connection::Connection,
         storage::Storage,
     },
     types::IniLike,
 };
 
-fn create_connection(endpoint: &str) -> Result<impl ConnectionOps> {
+fn create_connection(endpoint: &str) -> Result<impl Connection> {
     use pmppt::controller::connection::tcpmsgpack::TcpMsgpackConnection;
     TcpMsgpackConnection::from_endpoint(endpoint)
 }

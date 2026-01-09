@@ -16,3 +16,6 @@ serde_json = "1.0"
 serde_yml = "0.0"
 subprocess = { git = "https://github.com/mmrmaximuzz/rust-subprocess", branch = "os-interrupt" }
 tempdir = "0.3"
+
+[dev-dependencies]
+indoc = "2"

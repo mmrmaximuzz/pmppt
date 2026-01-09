@@ -14,53 +14,65 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{env, fs::File, io::Read, path::PathBuf, str::FromStr};
+use std::{
+    env,
+    fs::File,
+    io::Read,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use pmppt::{
-    common::Result,
-    controller::{activity, cfgparse, connection},
+    common::{self, Result},
+    controller::{self, RuntimeConfiguration, AgentsConfiguration},
 };
 
 fn main() {
     if let Err(msg) = main_wrapper() {
-        eprintln!("Error occured while running PMPTT controller: {msg}.");
+        eprintln!("PMPTT controller failed the execution: {msg}.");
         std::process::exit(1);
     }
 }
 
 fn main_wrapper() -> Result<()> {
-    let config_path_str = parse_cli_args()?;
-    let config_str = read_config_file(config_path_str)?;
-    let cfg = cfgparse::parse_config(&config_str)?;
-    run(cfg)
+    let (config_path, base_outdir_path) = parse_cli_args()?;
+
+    let raw_config_str = read_config_file(&config_path)?;
+    let raw_cfg = controller::cfgparse::parse_raw_config(&raw_config_str)
+        .map_err(|e| format!("failed to parse raw config: {e}"))?;
+    let (agents, pipeline) = controller::verify_config(raw_cfg)
+        .map_err(|e| format!("failed to validate config: {e}"))?;
+
+    let outdir = common::create_next_numeric_dir_in(&base_outdir_path)?;
+
+    run(agents, pipeline, outdir)
 }
 
-fn parse_cli_args() -> Result<String> {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 2 {
-        return Err(format!("usage: {} PATH_TO_CONFIG", args[0]));
+fn parse_cli_args() -> Result<(PathBuf, PathBuf)> {
+    let args: Vec<_> = env::args().collect();
+    if args.len() != 3 {
+        return Err(format!("usage: {} PATH_TO_CONFIG PATH_TO_OUTPUT", args[0]));
     }
 
-    Ok(args[1].clone())
+    let cfgpath = PathBuf::from_str(&args[1]).map_err(|e| format!("bad config path: {e}"))?;
+    let outpath = PathBuf::from_str(&args[2]).map_err(|e| format!("bad output path: {e}"))?;
+
+    Ok((cfgpath, outpath))
 }
 
-fn read_config_file(pathstr: String) -> Result<String> {
-    let config_path =
-        PathBuf::from_str(&pathstr).map_err(|e| format!("bad path provided '{pathstr}: {e}"))?;
+fn read_config_file(path: &Path) -> Result<String> {
+    let mut file = File::open(path).map_err(|e| format!("failed to open config '{path:?}: {e}"))?;
 
-    let mut file = File::open(config_path)
-        .map_err(|e| format!("failed to to open config path '{pathstr}: {e}"))?;
-
-    let mut config = String::with_capacity(8192);
+    let mut config = String::with_capacity(4096);
     file.read_to_string(&mut config)
-        .map_err(|e| format!("failed to read file {pathstr}: {e}"))?;
+        .map_err(|e| format!("failed to read {path:?}: {e}"))?;
 
     Ok(config)
 }
 
-fn run(cfg: cfgparse::Config) -> Result<()> {
-    println!("{cfg:?}");
-    activity::process_run(&cfg.run)?;
-    connection::connect_agents(&cfg.setup.agents)?;
+fn run(agents: AgentsConfiguration, cfg: RuntimeConfiguration, outdir: PathBuf) -> Result<()> {
+    dbg!(&agents);
+    dbg!(&cfg);
+    dbg!(outdir);
     Ok(())
 }

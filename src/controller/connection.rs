@@ -14,37 +14,21 @@
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-use std::{collections::HashMap, net::TcpStream};
-
 use crate::common::{
     Result,
     communication::{Request, Response},
 };
 
-use super::cfgparse::{AgentConfig, AgentId};
-
-pub struct Connection {
-    _sock: TcpStream,
-}
-
-pub type Connections = HashMap<AgentId, Connection>;
-
-pub fn connect_agents(cfg: &HashMap<AgentId, AgentConfig>) -> Result<Connections> {
-    let mut conns = HashMap::default();
-    for (name, params) in cfg {
-        let ip = params.ip;
-        let port = params.port;
-        let sock = TcpStream::connect((ip, port))
-            .map_err(|e| format!("failed to connect agent '{name}' ({ip}, {port}): {e}"))?;
-        conns.insert(name.clone(), Connection { _sock: sock });
-    }
-    Ok(conns)
-}
-
-pub trait ConnectionOps {
-    fn send(&mut self, req: Request) -> Res<()>;
-    fn recv(&mut self) -> Res<Response>;
+pub trait Connection {
+    fn send(&mut self, req: Request) -> Result<()>;
+    fn recv(&mut self) -> Result<Response>;
     fn close(self);
+}
+
+impl std::fmt::Debug for dyn Connection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&format!("Connection {:?}", &self as *const _))
+    }
 }
 
 pub mod tcpmsgpack {
@@ -62,7 +46,7 @@ pub mod tcpmsgpack {
         emsg, msgpack_impl,
     };
 
-    use super::ConnectionOps;
+    use super::Connection;
 
     pub struct TcpMsgpackConnection {
         conn: TcpStream,
@@ -75,9 +59,13 @@ pub mod tcpmsgpack {
                     .map_err(|e| format!("failed to connect to agent {endpoint}: {e}"))?,
             })
         }
+
+        pub fn from_conn(conn: TcpStream) -> Self {
+            Self { conn }
+        }
     }
 
-    impl ConnectionOps for TcpMsgpackConnection {
+    impl Connection for TcpMsgpackConnection {
         fn send(&mut self, req: Request) -> Result<()> {
             let mut msg_buf = vec![];
             let msg = msgpack_impl::Request::from(req);
