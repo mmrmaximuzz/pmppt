@@ -188,7 +188,10 @@ impl ActivityConfig {
 pub type ActivityCreatorFn = fn(ActivityConfig) -> Result<Box<dyn Activity>>;
 pub type ActivityCreator = Box<dyn Fn(ActivityConfig) -> Result<Box<dyn Activity>>>;
 
+pub type ActivityDatabase = HashMap<&'static str, ActivityCreator>;
+
 pub mod default_activities {
+    use std::collections::HashMap;
     use std::thread::sleep;
     use std::time::Duration;
 
@@ -200,7 +203,13 @@ pub mod default_activities {
     use crate::controller::storage::Storage;
     use crate::types::{ArtifactValue, ConfigValue};
 
-    use super::Activity;
+    use super::{Activity, ActivityDatabase};
+
+    trait ExportedActivity {
+        fn name(&self) -> &'static str;
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>>;
+    }
+
 
     struct Sleeper {
         period: Duration,
@@ -213,19 +222,30 @@ pub mod default_activities {
         }
     }
 
-    pub fn sleeper_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        if conf.has_artifacts() {
-            return Err(format!(
-                "sleeper does not accept artifacts but got: input={:?}, output={:?}",
-                conf.input, conf.output
-            ));
+    struct SleeperExport;
+
+    impl ExportedActivity for SleeperExport {
+        fn name(&self) -> &'static str {
+            "sleep"
         }
 
-        match conf.value {
-            Some(ConfigValue::Time(period)) => Ok(Box::new(Sleeper { period })),
-            other => Err(format!(
-                "sleeper expects just single Time argument, got {other:?}"
-            )),
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            if conf.has_artifacts() {
+                return Err(format!(
+                    "{} does not accept artifacts but got: input={:?}, output={:?}",
+                    self.name(),
+                    conf.input,
+                    conf.output
+                ));
+            }
+
+            match conf.value {
+                Some(ConfigValue::Time(period)) => Ok(Box::new(Sleeper { period })),
+                other => Err(format!(
+                    "'{}' expects just single Time argument, got {other:?}",
+                    self.name()
+                )),
+            }
         }
     }
 
@@ -306,22 +326,34 @@ pub mod default_activities {
         }
     }
 
-    pub fn proc_meminfo_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        if !conf.is_empty() {
-            return Err(format!(
-                "meminfo poller expects no config, but got: {conf:?}"
-            ));
-        }
-        Ok(Box::new(Poller::create("/proc/meminfo")))
+    struct PredefinedPoller {
+        name: &'static str,
+        pattern: String,
     }
 
-    pub fn proc_net_dev_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        if !conf.is_empty() {
-            return Err(format!(
-                "net_dev poller expects no config, but got: {conf:?}"
-            ));
+    impl PredefinedPoller {
+        fn new<S: AsRef<str>>(name: &'static str, pattern: S) -> Self {
+            Self {
+                name,
+                pattern: pattern.as_ref().to_string(),
+            }
         }
-        Ok(Box::new(Poller::create("/proc/net/dev")))
+    }
+
+    impl ExportedActivity for PredefinedPoller {
+        fn name(&self) -> &'static str {
+            self.name
+        }
+
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            if !conf.is_empty() {
+                return Err(format!(
+                    "{} poller is pre-defined and expects no config, but got: {conf:?}",
+                    self.name
+                ));
+            }
+            Ok(Box::new(Poller::create(&self.pattern)))
+        }
     }
 
     struct Launcher {
@@ -431,18 +463,34 @@ pub mod default_activities {
         }
     }
 
-    pub fn mpstat_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        if !conf.is_empty() {
-            return Err(format!("mpstat accepts empty config, but got {conf:?}"));
+    struct PredefinedLauncher {
+        name: &'static str,
+        comm: String,
+        mode: SpawnMode,
+        args: Vec<String>,
+    }
+
+    impl ExportedActivity for PredefinedLauncher {
+        fn name(&self) -> &'static str {
+            self.name
         }
 
-        Ok(Box::new(Launcher {
-            comm: String::from("mpstat"),
-            mode: SpawnMode::BackgroundKill,
-            args: ["-P", "ALL", "1"].into_iter().map(String::from).collect(),
-            id: None,
-            hint: None,
-        }))
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            if !conf.is_empty() {
+                return Err(format!(
+                    "'{}' launcher is pre-defined and accepts empty config, but got {conf:?}",
+                    self.name()
+                ));
+            }
+
+            Ok(Box::new(Launcher {
+                comm: self.comm.clone(),
+                mode: self.mode,
+                args: self.args.clone(),
+                id: None,
+                hint: None,
+            }))
+        }
     }
 
     struct IostatLauncher {
@@ -468,114 +516,114 @@ pub mod default_activities {
         }
     }
 
-    pub fn iostat_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        if conf.has_value() {
-            return Err(format!("iostat expect no value, but got {:?}", conf.value));
+    struct IostatExport;
+
+    impl ExportedActivity for IostatExport {
+        fn name(&self) -> &'static str {
+            "iostat"
         }
 
-        if conf.has_artifacts_out() {
-            return Err(format!(
-                "iostat expect no output artifacts but got {:?}",
-                conf.output
-            ));
-        }
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            if conf.has_value() {
+                return Err(format!("iostat expect no value, but got {:?}", conf.value));
+            }
 
-        let devs_art_name = conf.verify_optional_single_artifact_in("devices")?;
-
-        Ok(Box::new(IostatLauncher {
-            launcher: Launcher {
-                comm: String::from("iostat"),
-                mode: SpawnMode::BackgroundKill,
-                args: ["-d", "-t", "-x", "-m", "1"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect(),
-                id: None,
-                hint: None,
-            },
-            devs_art_name,
-        }))
-    }
-
-    pub fn fio_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        let fiocfg = match conf.value {
-            Some(ConfigValue::Ini(ini)) => ini,
-            None => return Err("fio expects configuration value, but got none".to_string()),
-            other => {
+            if conf.has_artifacts_out() {
                 return Err(format!(
-                    "fio expects INI-like configuration value, but got: {other:?}"
+                    "iostat expect no output artifacts but got {:?}",
+                    conf.output
                 ));
             }
-        };
 
-        if fiocfg.sections.is_empty() {
-            return Err("fio expects at least one section to run".to_string());
+            let devs_art_name = conf.verify_optional_single_artifact_in("devices")?;
+
+            Ok(Box::new(IostatLauncher {
+                launcher: Launcher {
+                    comm: String::from("iostat"),
+                    mode: SpawnMode::BackgroundKill,
+                    args: ["-d", "-t", "-x", "-m", "1"]
+                        .into_iter()
+                        .map(String::from)
+                        .collect(),
+                    id: None,
+                    hint: None,
+                },
+                devs_art_name,
+            }))
         }
-
-        let mut args: Vec<String> = fiocfg.global.iter().map(|s| format!("--{s}")).collect();
-        let mut bw_hint = vec![];
-        let mut iops_hint = vec![];
-        let mut lat_hint = vec![];
-
-        for (name, config) in fiocfg.sections {
-            args.push(format!("--name={name}"));
-            for line in &config {
-                args.push(format!("--{line}"));
-
-                // select the right hint to update
-                let hint = if line.starts_with("write_bw_log=") {
-                    &mut bw_hint
-                } else if line.starts_with("write_iops_log=") {
-                    &mut iops_hint
-                } else if line.starts_with("write_lat_log=") {
-                    &mut lat_hint
-                } else {
-                    continue;
-                };
-                hint.push(line.split_once("=").unwrap().1.to_string());
-            }
-            args.extend_from_slice(
-                &config
-                    .iter()
-                    .map(|s| format!("--{s}"))
-                    .collect::<Vec<String>>(),
-            );
-        }
-
-        Ok(Box::new(Launcher {
-            comm: String::from("fio"),
-            mode: SpawnMode::BackgroundWait,
-            args,
-            id: None,
-            hint: if bw_hint.is_empty() && iops_hint.is_empty() && lat_hint.is_empty() {
-                None
-            } else {
-                Some(Box::new(move || {
-                    [&bw_hint, &iops_hint, &lat_hint]
-                        .iter()
-                        .map(|h| h.join(":"))
-                        .collect::<Vec<String>>()
-                        .join(",")
-                }))
-            },
-        }))
     }
 
-    pub fn flamegraph_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        if !conf.is_empty() {
-            return Err(format!("flamegraph expects no config, but got: {conf:?}"));
+    struct FioExport;
+
+    impl ExportedActivity for FioExport {
+        fn name(&self) -> &'static str {
+            "fio"
         }
 
-        Ok(Box::new(Launcher {
-            comm: String::from("flamegraph"),
-            mode: SpawnMode::BackgroundWait, // TODO: add SIGINT handler
-            args: ["-F", "99", "--", "--all-cpus", "sleep", "3"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-            id: None,
-            hint: Some(Box::new(|| String::from("flamegraph.svg"))),
-        }))
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            let fiocfg = match conf.value {
+                Some(ConfigValue::Ini(ini)) => ini,
+                None => return Err("fio expects configuration value, but got none".to_string()),
+                other => {
+                    return Err(format!(
+                        "fio expects INI-like configuration value, but got: {other:?}"
+                    ));
+                }
+            };
+
+            if fiocfg.sections.is_empty() {
+                return Err("fio expects at least one section to run".to_string());
+            }
+
+            let mut args: Vec<String> = fiocfg.global.iter().map(|s| format!("--{s}")).collect();
+            let mut bw_hint = vec![];
+            let mut iops_hint = vec![];
+            let mut lat_hint = vec![];
+
+            for (name, config) in fiocfg.sections {
+                args.push(format!("--name={name}"));
+                for line in &config {
+                    args.push(format!("--{line}"));
+
+                    // select the right hint to update
+                    let hint = if line.starts_with("write_bw_log=") {
+                        &mut bw_hint
+                    } else if line.starts_with("write_iops_log=") {
+                        &mut iops_hint
+                    } else if line.starts_with("write_lat_log=") {
+                        &mut lat_hint
+                    } else {
+                        continue;
+                    };
+
+                    hint.push(line.split_once("=").unwrap().1.to_string());
+                }
+                args.extend_from_slice(
+                    &config
+                        .iter()
+                        .map(|s| format!("--{s}"))
+                        .collect::<Vec<String>>(),
+                );
+            }
+
+            Ok(Box::new(Launcher {
+                comm: String::from("fio"),
+                mode: SpawnMode::BackgroundWait,
+                args,
+                id: None,
+                hint: if bw_hint.is_empty() && iops_hint.is_empty() && lat_hint.is_empty() {
+                    None
+                } else {
+                    Some(Box::new(move || {
+                        [&bw_hint, &iops_hint, &lat_hint]
+                            .iter()
+                            .map(|h| h.join(":"))
+                            .collect::<Vec<String>>()
+                            .join(",")
+                    }))
+                },
+            }))
+        }
     }
 
     struct LookupPaths {
@@ -608,27 +656,70 @@ pub mod default_activities {
         }
     }
 
-    pub fn lookup_creator(conf: ActivityConfig) -> Result<Box<dyn Activity>> {
-        if conf.has_artifacts_in() {
-            return Err(format!(
-                "lookup expects no input artifacts but got: {:?}",
-                conf.input
-            ));
+    struct LookupPathsExport;
+
+    impl ExportedActivity for LookupPathsExport {
+        fn name(&self) -> &'static str {
+            "lookup_paths"
         }
 
-        let pattern = match conf.value {
-            Some(ConfigValue::String(ref pattern)) => pattern.clone(),
-            other => {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            if conf.has_artifacts_in() {
                 return Err(format!(
-                    "lookup expects config value of type String, got: {other:?}"
+                    "'{}' expects no input artifacts but got: {:?}",
+                    self.name(),
+                    conf.input
                 ));
             }
-        };
 
-        let out_paths = conf
-            .verify_single_artifact_out("paths")
-            .map_err(|e| format!("lookup out 'paths': {e}"))?;
+            let pattern = match conf.value {
+                Some(ConfigValue::String(ref pattern)) => pattern.clone(),
+                other => {
+                    return Err(format!(
+                        "'{}' expects config value of type String, got: {other:?}",
+                        self.name()
+                    ));
+                }
+            };
 
-        Ok(Box::new(LookupPaths { pattern, out_paths }))
+            let out_paths = conf
+                .verify_single_artifact_out("paths")
+                .map_err(|e| format!("'{}' out 'paths': {e}", self.name()))?;
+
+            Ok(Box::new(LookupPaths { pattern, out_paths }))
+        }
+    }
+
+    pub fn export_all() -> ActivityDatabase {
+        let exports: Vec<Box<dyn ExportedActivity>> = vec![
+            Box::new(SleeperExport),
+            Box::new(PredefinedPoller::new("proc_meminfo", "/proc/meminfo")),
+            Box::new(PredefinedPoller::new("proc_net_dev", "/proc/net/dev")),
+            Box::new(PredefinedLauncher {
+                name: "mpstat",
+                comm: "mpstat".to_string(),
+                mode: SpawnMode::BackgroundKill,
+                args: ["-P", "ALL", "1"].into_iter().map(String::from).collect(),
+            }),
+            Box::new(PredefinedLauncher {
+                name: "flamegraph",
+                comm: "flamegraph".to_string(),
+                mode: SpawnMode::BackgroundWait,
+                args: ["-F", "99", "--", "--all-cpus", "sleep", "3"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+            }),
+            Box::new(IostatExport),
+            Box::new(LookupPathsExport),
+            Box::new(FioExport),
+        ];
+
+        let mut result: ActivityDatabase = HashMap::new();
+        for e in exports {
+            let res = result.insert(e.name(), Box::new(move |c| e.creator(c)));
+            assert!(res.is_none());
+        }
+        result
     }
 }

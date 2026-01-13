@@ -16,7 +16,7 @@
 
 //! Just some test program to implement the trait methods, not a useful executable
 
-use std::{collections::HashMap, env, fs::File, io::Write, path::PathBuf, time::Duration};
+use std::{env, fs::File, io::Write, path::PathBuf, time::Duration};
 
 use pmppt::{
     common::{
@@ -24,7 +24,7 @@ use pmppt::{
         communication::{Request, Response},
     },
     controller::{
-        activity::{Activity, ActivityConfig, ActivityCreator, ActivityCreatorFn},
+        activity::{Activity, ActivityConfig, ActivityDatabase},
         connection::Connection,
         storage::Storage,
     },
@@ -36,34 +36,17 @@ fn create_connection(endpoint: &str) -> Result<impl Connection> {
     TcpMsgpackConnection::from_endpoint(endpoint)
 }
 
-type ActivityDatabase = HashMap<String, ActivityCreator>;
-
 fn collect_activity_database() -> ActivityDatabase {
-    use pmppt::controller::activity::default_activities::*;
+    use pmppt::controller::activity::default_activities;
 
-    let creators_info: &[(&str, ActivityCreatorFn)] = &[
-        ("sleep", sleeper_creator),
-        ("mpstat", mpstat_creator),
-        ("iostat", iostat_creator),
-        ("netdev", proc_net_dev_creator),
-        ("meminfo", proc_meminfo_creator),
-        ("lookup_paths", lookup_creator),
-        ("flamegraph", flamegraph_creator),
-        ("fio", fio_creator),
-    ];
-
-    let mut db: ActivityDatabase = HashMap::new();
-    for (name, func) in creators_info {
-        db.insert(name.to_string(), Box::new(func));
-    }
-    db
+    default_activities::export_all()
 }
 
 fn configure_pipeline(db: &ActivityDatabase) -> Result<Vec<(String, Box<dyn Activity>)>> {
     let pipeline_info = [
         ("mpstat", ActivityConfig::new()),
-        ("netdev", ActivityConfig::new()),
-        ("meminfo", ActivityConfig::new()),
+        ("proc_net_dev", ActivityConfig::new()),
+        ("proc_meminfo", ActivityConfig::new()),
         (
             "lookup_paths",
             ActivityConfig::with_str("/dev/loop0").artifact_out("paths", "LOOP_DEVS"),

@@ -263,8 +263,8 @@ fn read_mapping(path: &Path) -> Result<Vec<PlotInfo>> {
         let datasuffix = match name {
             "mpstat" => "out.log",
             "iostat" => "out.log",
-            "netdev" => "poll.log",
-            "meminfo" => "poll.log",
+            "proc_net_dev" => "poll.log",
+            "proc_meminfo" => "poll.log",
             "fio" => "out.log",
             "flamegraph" => "out.log",
             _ => continue,
@@ -306,8 +306,8 @@ fn process_dir(outdir: PathBuf) -> Result<()> {
         match name.as_str() {
             "mpstat" => plot_heatmaps(sysstat::mpstat::parse(&content)?).write_html(outfile),
             "iostat" => plot_iostat(sysstat::iostat::parse(&content)?).write_html(outfile),
-            "netdev" => plot_net_dev(procfs::parse_net_dev(&content)?).write_html(outfile),
-            "meminfo" => plot_meminfo(procfs::parse_meminfo(&content)?).write_html(outfile),
+            "proc_net_dev" => plot_net_dev(procfs::parse_net_dev(&content)?).write_html(outfile),
+            "proc_meminfo" => plot_meminfo(procfs::parse_meminfo(&content)?).write_html(outfile),
             "fio" => {
                 if let Some(opts) = options {
                     fio::process(&content, &plotdir.path().join(datadir), &opts)
@@ -315,13 +315,17 @@ fn process_dir(outdir: PathBuf) -> Result<()> {
                 }
             }
             "flamegraph" => {
-                if let Some(svgpath) = options {
-                    std::fs::rename(
-                        plotdir.path().join(datadir).join(&svgpath),
-                        outdir.join(&svgpath),
-                    )
-                    .unwrap();
-                }
+                let svgpath = if let Some(svgpath) = options {
+                    svgpath
+                } else {
+                    "flamegraph.svg".to_string()
+                };
+
+                std::fs::rename(
+                    plotdir.path().join(datadir).join(&svgpath),
+                    outdir.join(&svgpath),
+                )
+                .unwrap();
             }
             _ => unreachable!("{name}"),
         };
