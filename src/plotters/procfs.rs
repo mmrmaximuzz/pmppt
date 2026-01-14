@@ -63,7 +63,9 @@ fn remove_nonchanging_data<T: PartialEq>(map: &mut HashMap<String, Vec<T>>) {
     }
 }
 
-fn handle_chunk(chunk: &str) -> Result<(String, DateTime<FixedOffset>, impl Iterator<Item = &str>)> {
+fn handle_chunk(
+    chunk: &str,
+) -> Result<(String, DateTime<FixedOffset>, impl Iterator<Item = &str>)> {
     let (timeline, data) = chunk
         .split_once("\n")
         .ok_or_else(|| format!("bad chunk: {chunk}"))?;

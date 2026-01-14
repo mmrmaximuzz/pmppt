@@ -94,6 +94,16 @@ impl ActivityConfig {
         }
     }
 
+    pub fn with_2s_tuple<T: AsRef<str>>(a: T, b: T) -> Self {
+        Self {
+            value: Some(ConfigValue::T2String((
+                a.as_ref().to_string(),
+                b.as_ref().to_string(),
+            ))),
+            ..Default::default()
+        }
+    }
+
     pub fn with_ini(ini: IniLike) -> Self {
         Self {
             value: Some(ConfigValue::Ini(ini)),
@@ -210,7 +220,6 @@ pub mod default_activities {
         fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>>;
     }
 
-
     struct Sleeper {
         period: Duration,
     }
@@ -252,6 +261,7 @@ pub mod default_activities {
     struct Poller {
         pattern: String,
         id: Option<Id>,
+        hint: Option<String>,
     }
 
     impl Activity for Poller {
@@ -313,15 +323,16 @@ pub mod default_activities {
             assert_eq!(id, recv_id);
 
             // no special plot info for poller activities - the format is well-known
-            Ok(Some((id, None)))
+            Ok(Some((id, self.hint.clone())))
         }
     }
 
     impl Poller {
-        fn create(pattern: &str) -> Self {
+        fn create(pattern: &str, hint: Option<String>) -> Self {
             Self {
                 pattern: pattern.to_string(),
                 id: None,
+                hint,
             }
         }
     }
@@ -352,7 +363,39 @@ pub mod default_activities {
                     self.name
                 ));
             }
-            Ok(Box::new(Poller::create(&self.pattern)))
+            // set hint to None, the poller is pre-defined and has its own name
+            Ok(Box::new(Poller::create(&self.pattern, None)))
+        }
+    }
+
+    struct CustomPoller;
+
+    impl ExportedActivity for CustomPoller {
+        fn name(&self) -> &'static str {
+            "custom_poller"
+        }
+
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            if conf.has_artifacts() {
+                return Err(format!(
+                    "'{}' poller expects no artifacts, but got none",
+                    self.name()
+                ));
+            }
+
+            match conf.value {
+                Some(ConfigValue::T2String((pattern, hint))) => {
+                    Ok(Box::new(Poller::create(&pattern, Some(hint))))
+                }
+                None => Err(format!(
+                    "'{}' poller expects configuration but got none",
+                    self.name()
+                )),
+                other => Err(format!(
+                    "'{}' poller expects 2-string tuple but got none {other:?}",
+                    self.name()
+                )),
+            }
         }
     }
 
@@ -693,6 +736,7 @@ pub mod default_activities {
     pub fn export_all() -> ActivityDatabase {
         let exports: Vec<Box<dyn ExportedActivity>> = vec![
             Box::new(SleeperExport),
+            Box::new(CustomPoller),
             Box::new(PredefinedPoller::new("proc_meminfo", "/proc/meminfo")),
             Box::new(PredefinedPoller::new("proc_net_dev", "/proc/net/dev")),
             Box::new(PredefinedLauncher {

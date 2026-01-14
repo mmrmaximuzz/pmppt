@@ -16,9 +16,9 @@
 
 use std::{collections::HashMap, net::IpAddr};
 
+use crate::common::Result;
 use serde::Deserialize;
 use serde_yml;
-use crate::common::Result;
 
 use super::activity::ActivityConfig;
 
@@ -52,9 +52,9 @@ pub type ActivityChain = Vec<HashMap<ActivityName, RawActivityArgs>>;
 #[serde(deny_unknown_fields)]
 pub struct RawActivityArgs {
     pub args: Option<serde_yml::Value>,
-    #[serde(rename="in")]
+    #[serde(rename = "in")]
     pub input: Option<HashMap<String, String>>,
-    #[serde(rename="out")]
+    #[serde(rename = "out")]
     pub output: Option<HashMap<String, String>>,
 }
 

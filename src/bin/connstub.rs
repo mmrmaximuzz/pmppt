@@ -45,6 +45,10 @@ fn collect_activity_database() -> ActivityDatabase {
 fn configure_pipeline(db: &ActivityDatabase) -> Result<Vec<(String, Box<dyn Activity>)>> {
     let pipeline_info = [
         ("mpstat", ActivityConfig::new()),
+        (
+            "custom_poller",
+            ActivityConfig::with_2s_tuple("/proc/softirqs", "sirq"),
+        ),
         ("proc_net_dev", ActivityConfig::new()),
         ("proc_meminfo", ActivityConfig::new()),
         (

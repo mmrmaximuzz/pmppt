@@ -23,8 +23,8 @@ use log::{error, info};
 
 use pmppt::agent::Agent;
 use pmppt::common::Result;
-use pmppt::common::emsg;
 use pmppt::common::create_next_numeric_dir_in;
+use pmppt::common::emsg;
 
 fn main_selfhosted(args: &[String]) -> Result<()> {
     use pmppt::agent::proto_impl::selfhosted;

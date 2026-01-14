@@ -24,7 +24,7 @@ use std::{
 
 use pmppt::{
     common::{self, Result},
-    controller::{self, RuntimeConfiguration, AgentsConfiguration},
+    controller::{self, AgentsConfiguration, RuntimeConfiguration},
 };
 
 fn main() {

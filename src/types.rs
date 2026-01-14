@@ -55,6 +55,7 @@ impl IniLike {
 #[derive(Clone, Debug)]
 pub enum ConfigValue {
     String(String),
+    T2String((String, String)),
     Time(Duration),
     Ini(IniLike),
 }
