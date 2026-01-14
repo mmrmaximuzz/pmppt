@@ -24,11 +24,7 @@ use crate::{
     types::{ConfigValue, IniLike},
 };
 
-use super::{cfgparse::RawRuntimeConfig, connection::Connection};
-
-pub fn process_run(_run: &RawRuntimeConfig) -> Result<()> {
-    Ok(())
-}
+use super::connection::Connection;
 
 // TODO: change String to more intelligent type
 pub type PlotHint = (Id, Option<String>);
@@ -95,12 +91,12 @@ impl ActivityConfig {
         }
     }
 
-    pub fn with_2s_tuple<T: AsRef<str>>(a: T, b: T) -> Self {
+    pub fn with_poll_args<T: AsRef<str>>(p: T, h: Option<T>) -> Self {
         Self {
-            value: Some(ConfigValue::T2String((
-                a.as_ref().to_string(),
-                b.as_ref().to_string(),
-            ))),
+            value: Some(ConfigValue::PollArgs {
+                pattern: p.as_ref().to_string(),
+                hint: h.map(|h| h.as_ref().to_string()),
+            }),
             ..Default::default()
         }
     }
@@ -214,7 +210,7 @@ impl ActivityConfig {
 }
 
 pub type ActivityCreatorFn = fn(ActivityConfig) -> Result<Box<dyn Activity>>;
-pub type ActivityCreator = Box<dyn Fn(ActivityConfig) -> Result<Box<dyn Activity>>>;
+pub type ActivityCreator = Box<dyn Fn(ActivityConfig) -> Result<Box<dyn Activity + Send>>>;
 
 pub type ActivityDatabase = HashMap<&'static str, ActivityCreator>;
 
@@ -235,7 +231,7 @@ pub mod default_activities {
 
     trait ExportedActivity {
         fn name(&self) -> &'static str;
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>>;
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>>;
     }
 
     struct Sleeper {
@@ -256,7 +252,7 @@ pub mod default_activities {
             "sleep"
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if conf.has_artifacts() {
                 return Err(format!(
                     "{} does not accept artifacts but got: input={:?}, output={:?}",
@@ -374,7 +370,7 @@ pub mod default_activities {
             self.name
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if !conf.is_empty() {
                 return Err(format!(
                     "{} poller is pre-defined and expects no config, but got: {conf:?}",
@@ -393,7 +389,7 @@ pub mod default_activities {
             "poller"
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if conf.has_artifacts() {
                 return Err(format!(
                     "'{}' poller expects no artifacts, but got some",
@@ -422,7 +418,7 @@ pub mod default_activities {
         args: Vec<String>,
         mode: SpawnMode,
         id: Option<Id>,
-        hint: Option<Box<dyn Fn() -> String>>,
+        hint: Option<Box<dyn Fn() -> String + Send>>,
     }
 
     impl Launcher {
@@ -536,7 +532,7 @@ pub mod default_activities {
             self.name
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if !conf.is_empty() {
                 return Err(format!(
                     "'{}' launcher is pre-defined and accepts empty config, but got {conf:?}",
@@ -561,7 +557,7 @@ pub mod default_activities {
             "launcher"
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if conf.has_artifacts() {
                 return Err(format!(
                     "'{}' expects no artifacts, but got some, in='{:?}', out='{:?}'",
@@ -623,7 +619,7 @@ pub mod default_activities {
             "iostat"
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+       fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if conf.has_value() {
                 return Err(format!("iostat expect no value, but got {:?}", conf.value));
             }
@@ -660,7 +656,7 @@ pub mod default_activities {
             "fio"
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             let fiocfg = match conf.value {
                 Some(ConfigValue::Ini(ini)) => ini,
                 None => return Err("fio expects configuration value, but got none".to_string()),
@@ -763,7 +759,7 @@ pub mod default_activities {
             "lookup_paths"
         }
 
-        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if conf.has_artifacts_in() {
                 return Err(format!(
                     "'{}' expects no input artifacts but got: {:?}",

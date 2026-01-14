@@ -47,7 +47,7 @@ fn find_max_numeric_dir(base: &Path) -> Result<u32> {
 
 pub fn create_next_numeric_dir_in(base: &Path) -> Result<PathBuf> {
     if base.exists() && !base.is_dir() {
-        return Err(format!("path provided '{base:?}' is not a directory"));
+        return Err(format!("path '{base:?}' is not a directory"));
     }
 
     let next_dir_num = if base.exists() {
@@ -57,7 +57,7 @@ pub fn create_next_numeric_dir_in(base: &Path) -> Result<PathBuf> {
     };
 
     let new_dir = base.join(Path::new(&next_dir_num.to_string()));
-    std::fs::create_dir_all(&new_dir).map_err(|e| format!("cannot create ouput dir {e}"))?;
+    std::fs::create_dir_all(&new_dir).map_err(|e| format!("cannot create dir in {base:?}: {e}"))?;
 
     Ok(new_dir)
 }

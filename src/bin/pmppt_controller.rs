@@ -24,7 +24,7 @@ use std::{
 
 use pmppt::{
     common::{self, Result},
-    controller::{self, AgentsConfiguration, RuntimeConfiguration},
+    controller::{self, activity::ActivityDatabase, cfgparse::ParserDatabase},
 };
 
 fn main() {
@@ -37,15 +37,25 @@ fn main() {
 fn main_wrapper() -> Result<()> {
     let (config_path, base_outdir_path) = parse_cli_args()?;
 
+    let parsers_db = get_parsers();
+    let activities_db = get_activities();
+
     let raw_config_str = read_config_file(&config_path)?;
-    let raw_cfg = controller::cfgparse::parse_raw_config(&raw_config_str)
+    let raw_cfg = controller::cfgparse::RawConfig::parse(&raw_config_str)
         .map_err(|e| format!("failed to parse raw config: {e}"))?;
-    let (agents, pipeline) = controller::verify_config(raw_cfg)
+    let (agents_cfg, runtime_cfg) = controller::verify_config(raw_cfg, parsers_db)
         .map_err(|e| format!("failed to validate config: {e}"))?;
 
-    let outdir = common::create_next_numeric_dir_in(&base_outdir_path)?;
+    let runtime = controller::create_runtime(runtime_cfg, activities_db)
+        .map_err(|e| format!("failed to create runtime: {e}"))?;
+    let agents = controller::connect_agents(agents_cfg)
+        .map_err(|e| format!("failed to connect agents: {e}"))?;
+    let outdir = common::create_next_numeric_dir_in(&base_outdir_path)
+        .map_err(|e| format!("failed to create output dir: {e}"))?;
 
-    run(agents, pipeline, outdir)
+    controller::run(agents, runtime, &outdir).map_err(|e| format!("error while running: {e}"))?;
+    println!("completed: output directory '{outdir:?}'");
+    Ok(())
 }
 
 fn parse_cli_args() -> Result<(PathBuf, PathBuf)> {
@@ -60,6 +70,16 @@ fn parse_cli_args() -> Result<(PathBuf, PathBuf)> {
     Ok((cfgpath, outpath))
 }
 
+fn get_parsers() -> ParserDatabase {
+    use crate::controller::cfgparse::yaml_parsers;
+    yaml_parsers::export_all()
+}
+
+fn get_activities() -> ActivityDatabase {
+    use crate::controller::activity::default_activities;
+    default_activities::export_all()
+}
+
 fn read_config_file(path: &Path) -> Result<String> {
     let mut file = File::open(path).map_err(|e| format!("failed to open config '{path:?}: {e}"))?;
 
@@ -68,11 +88,4 @@ fn read_config_file(path: &Path) -> Result<String> {
         .map_err(|e| format!("failed to read {path:?}: {e}"))?;
 
     Ok(config)
-}
-
-fn run(agents: AgentsConfiguration, cfg: RuntimeConfiguration, outdir: PathBuf) -> Result<()> {
-    dbg!(&agents);
-    dbg!(&cfg);
-    dbg!(outdir);
-    Ok(())
 }

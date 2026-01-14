@@ -58,6 +58,10 @@ impl IniLike {
 pub enum ConfigValue {
     String(String),
     T2String((String, String)),
+    PollArgs {
+        pattern: String,
+        hint: Option<String>,
+    },
     LaunchArgs {
         comm: String,
         mode: SpawnMode,

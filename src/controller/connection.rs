@@ -31,6 +31,15 @@ impl std::fmt::Debug for dyn Connection {
     }
 }
 
+pub fn collect_data(conn: &mut dyn Connection) -> Result<Vec<u8>> {
+    conn.send(Request::Collect)?;
+    match conn.recv() {
+        Ok(Response::Collect(data)) => data,
+        Err(e) => Err(e),
+        other => unreachable!("{other:?}"),
+    }
+}
+
 pub mod tcpmsgpack {
     use std::{
         io::{Read, Write},
