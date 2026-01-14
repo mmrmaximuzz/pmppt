@@ -16,6 +16,8 @@
 
 use std::time::Duration;
 
+use crate::common::communication::SpawnMode;
+
 #[derive(Clone, Debug)]
 pub enum ArtifactValue {
     StringList(Vec<String>),
@@ -56,6 +58,12 @@ impl IniLike {
 pub enum ConfigValue {
     String(String),
     T2String((String, String)),
+    LaunchArgs {
+        comm: String,
+        mode: SpawnMode,
+        args: Vec<String>,
+        hint: String,
+    },
     Time(Duration),
     Ini(IniLike),
 }

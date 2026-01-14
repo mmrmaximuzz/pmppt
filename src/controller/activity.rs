@@ -17,6 +17,7 @@
 use std::fmt::Debug;
 use std::{collections::HashMap, time::Duration};
 
+use crate::common::communication::SpawnMode;
 use crate::{
     common::{Result, communication::Id},
     controller::storage::Storage,
@@ -100,6 +101,23 @@ impl ActivityConfig {
                 a.as_ref().to_string(),
                 b.as_ref().to_string(),
             ))),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_launch_args<T: AsRef<str>>(
+        comm: T,
+        mode: SpawnMode,
+        args: Vec<String>,
+        hint: T,
+    ) -> Self {
+        Self {
+            value: Some(ConfigValue::LaunchArgs {
+                comm: comm.as_ref().to_string(),
+                mode,
+                args,
+                hint: hint.as_ref().to_string(),
+            }),
             ..Default::default()
         }
     }
@@ -368,17 +386,17 @@ pub mod default_activities {
         }
     }
 
-    struct CustomPoller;
+    struct GenericPoller;
 
-    impl ExportedActivity for CustomPoller {
+    impl ExportedActivity for GenericPoller {
         fn name(&self) -> &'static str {
-            "custom_poller"
+            "poller"
         }
 
         fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
             if conf.has_artifacts() {
                 return Err(format!(
-                    "'{}' poller expects no artifacts, but got none",
+                    "'{}' poller expects no artifacts, but got some",
                     self.name()
                 ));
             }
@@ -533,6 +551,45 @@ pub mod default_activities {
                 id: None,
                 hint: None,
             }))
+        }
+    }
+
+    struct GenericLauncher;
+
+    impl ExportedActivity for GenericLauncher {
+        fn name(&self) -> &'static str {
+            "launcher"
+        }
+
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity>> {
+            if conf.has_artifacts() {
+                return Err(format!(
+                    "'{}' expects no artifacts, but got some, in='{:?}', out='{:?}'",
+                    self.name(),
+                    conf.input,
+                    conf.output
+                ));
+            }
+
+            match conf.value {
+                Some(ConfigValue::LaunchArgs {
+                    comm,
+                    mode,
+                    args,
+                    hint,
+                }) => Ok(Box::new(Launcher {
+                    comm,
+                    args,
+                    mode,
+                    id: None,
+                    hint: Some(Box::new(move || hint.clone())),
+                })),
+                None => Err(format!("'{}' expects config, but got none", self.name())),
+                other => Err(format!(
+                    "'{}' expects LaunchArgs confif, but got {other:?}",
+                    self.name()
+                )),
+            }
         }
     }
 
@@ -735,10 +792,14 @@ pub mod default_activities {
 
     pub fn export_all() -> ActivityDatabase {
         let exports: Vec<Box<dyn ExportedActivity>> = vec![
+            // utilities
             Box::new(SleeperExport),
-            Box::new(CustomPoller),
+            // pollers
+            Box::new(GenericPoller),
             Box::new(PredefinedPoller::new("proc_meminfo", "/proc/meminfo")),
             Box::new(PredefinedPoller::new("proc_net_dev", "/proc/net/dev")),
+            // launchers
+            Box::new(GenericLauncher),
             Box::new(PredefinedLauncher {
                 name: "mpstat",
                 comm: "mpstat".to_string(),

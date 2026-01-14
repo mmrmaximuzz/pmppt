@@ -46,8 +46,20 @@ fn configure_pipeline(db: &ActivityDatabase) -> Result<Vec<(String, Box<dyn Acti
     let pipeline_info = [
         ("mpstat", ActivityConfig::new()),
         (
-            "custom_poller",
+            "poller",
             ActivityConfig::with_2s_tuple("/proc/softirqs", "sirq"),
+        ),
+        (
+            "launcher",
+            ActivityConfig::with_launch_args(
+                "bash",
+                pmppt::common::communication::SpawnMode::BackgroundWait,
+                ["-c", "echo 100500"]
+                    .into_iter()
+                    .map(String::from)
+                    .collect(),
+                "printing",
+            ),
         ),
         ("proc_net_dev", ActivityConfig::new()),
         ("proc_meminfo", ActivityConfig::new()),
