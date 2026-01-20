@@ -554,7 +554,7 @@ pub mod default_activities {
 
     impl ExportedActivity for GenericLauncher {
         fn name(&self) -> &'static str {
-            "launcher"
+            "launch"
         }
 
         fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {

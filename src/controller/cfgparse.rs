@@ -70,7 +70,7 @@ pub mod yaml_parsers {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use crate::common::Result;
+    use crate::common::{Result, communication::SpawnMode};
     use crate::types::ConfigValue;
 
     use super::{ParserDatabase, RawArgs};
@@ -234,8 +234,8 @@ pub mod yaml_parsers {
         }
     }
 
-    struct PollerParser;
-    impl ExportedYamlParser for PollerParser {
+    struct GenericPollerParser;
+    impl ExportedYamlParser for GenericPollerParser {
         fn name(&self) -> &'static str {
             "poller"
         }
@@ -261,12 +261,48 @@ pub mod yaml_parsers {
         }
     }
 
+    struct GenericLaunchParser;
+    impl ExportedYamlParser for GenericLaunchParser {
+        fn name(&self) -> &'static str {
+            "launch"
+        }
+
+        fn parse(&self, args: RawArgs) -> Result<ConfigValue> {
+            let values = MappingArgParser::new(&[
+                ("comm", (YamlValueExtractor::String, true)),
+                ("mode", (YamlValueExtractor::String, true)),
+                ("hint", (YamlValueExtractor::String, false)),
+            ])
+            .parse(args)?;
+
+            let ConfigValue::String(comm) = values["comm"].clone() else {
+                unreachable!()
+            };
+            let ConfigValue::String(mode) = values["mode"].clone() else {
+                unreachable!()
+            };
+            let mode = match mode.as_str() {
+                "fg" => SpawnMode::Foreground,
+                "bgkill" => SpawnMode::BackgroundKill,
+                "bgwait" => SpawnMode::BackgroundWait,
+                other => return Err(format!("bad launch mode: {other}")),
+            };
+            let hint = values.get("hint").map(|h| match h {
+                ConfigValue::String(hint) => hint.clone(),
+                _ => unreachable!(),
+            }).unwrap_or_default();
+
+            Ok(ConfigValue::LaunchArgs { comm, mode, args: vec![], hint })
+        }
+    }
+
     pub fn export_all() -> ParserDatabase {
         let parsers: Vec<Box<dyn ExportedYamlParser>> = vec![
             Box::new(NoArgsParser::new("mpstat")),
             Box::new(NoArgsParser::new("iostat")),
             Box::new(NoArgsParser::new("proc_net_dev")),
             Box::new(NoArgsParser::new("proc_meminfo")),
+            Box::new(NoArgsParser::new("flamegraph")),
             Box::new(SingleArgParser::new(
                 "sleep",
                 "secs",
@@ -277,7 +313,8 @@ pub mod yaml_parsers {
                 "pattern",
                 YamlValueExtractor::String,
             )),
-            Box::new(PollerParser),
+            Box::new(GenericPollerParser),
+            Box::new(GenericLaunchParser),
         ];
 
         let mut result: ParserDatabase = HashMap::new();
