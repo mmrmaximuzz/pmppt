@@ -54,7 +54,7 @@ fn main_wrapper() -> Result<()> {
         .map_err(|e| format!("failed to create output dir: {e}"))?;
 
     controller::run(agents, runtime, &outdir).map_err(|e| format!("error while running: {e}"))?;
-    println!("completed: output directory '{outdir:?}'");
+    println!("completed: output directory {outdir:?}");
     Ok(())
 }
 

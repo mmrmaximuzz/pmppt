@@ -619,7 +619,7 @@ pub mod default_activities {
             "iostat"
         }
 
-       fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
+        fn creator(&self, conf: ActivityConfig) -> Result<Box<dyn Activity + Send>> {
             if conf.has_value() {
                 return Err(format!("iostat expect no value, but got {:?}", conf.value));
             }

@@ -66,7 +66,10 @@ pub type ActivityChainConfiguration = Vec<(String, ActivityConfig)>;
 pub type StageConfiguragion = HashMap<String, ActivityChainConfiguration>;
 pub type RuntimeConfiguration = Vec<(String, StageConfiguragion)>;
 
-pub type Runtime = Vec<(String, HashMap<String, Vec<(String, Box<dyn Activity + Send>)>>)>;
+pub type Runtime = Vec<(
+    String,
+    HashMap<String, Vec<(String, Box<dyn Activity + Send>)>>,
+)>;
 
 pub fn verify_config(
     raw_cfg: RawConfig,
@@ -298,7 +301,7 @@ pub fn run(mut agents: AgentConnections, mut runtime: Runtime, outdir: &Path) ->
                 for (activity, (id, hint)) in hints {
                     file.write_all(
                         format!(
-                            "{id:03} {activity} {}",
+                            "{id:03} {activity} {}\n",
                             if let Some(h) = hint { h } else { "" }
                         )
                         .as_bytes(),
