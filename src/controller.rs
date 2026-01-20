@@ -21,7 +21,7 @@ pub mod storage;
 
 use std::{
     collections::HashMap,
-    fs::File,
+    fs::{File, OpenOptions},
     io::Write,
     path::Path,
     sync::{Arc, Mutex},
@@ -284,8 +284,16 @@ pub fn run(mut agents: AgentConnections, mut runtime: Runtime, outdir: &Path) ->
         let agent_path = outdir.join(&agent_name);
         std::fs::create_dir(&agent_path).expect("failed to create dir for agent");
 
-        let data = connection::collect_data(conn.lock().unwrap().as_mut())
+        // finish with this agent
+        let mut conn = conn.lock().unwrap();
+        connection::stop_all(conn.as_mut())
+            .map_err(|e| format!("failed to stop the rest on agent {agent_name}: {e}"))?;
+        let data = connection::collect_data(conn.as_mut())
             .map_err(|e| format!("failed to collect data from {agent_name}: {e}"))?;
+        connection::end(conn.as_mut())
+            .map_err(|e| format!("failed to finalize run on agent {agent_name}: {e}"))?;
+        conn.close();
+
         File::create(agent_path.join("out.tgz"))
             .unwrap()
             .write_all(&data)
@@ -297,7 +305,12 @@ pub fn run(mut agents: AgentConnections, mut runtime: Runtime, outdir: &Path) ->
                 if *agent != agent_name {
                     continue;
                 }
-                let mut file = File::create(agent_path.join("out.map")).unwrap();
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(agent_path.join("out.map"))
+                    .unwrap();
+
                 for (activity, (id, hint)) in hints {
                     file.write_all(
                         format!(

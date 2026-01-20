@@ -116,6 +116,7 @@ pub mod yaml_parsers {
     enum YamlValueExtractor {
         TimeDurationSecs,
         String,
+        StringList,
     }
 
     impl YamlValueExtractor {
@@ -125,7 +126,21 @@ pub mod yaml_parsers {
                     ConfigValue::Time(Duration::from_secs_f64(n.as_f64().unwrap())),
                 ),
                 (YamlValueExtractor::String, serde_yml::Value::String(s)) => {
-                    Ok(ConfigValue::String(s.to_string()))
+                    Ok(ConfigValue::String(s.clone()))
+                }
+                (YamlValueExtractor::StringList, serde_yml::Value::Sequence(seq)) => {
+                    let mut list = Vec::with_capacity(seq.len());
+                    for el in seq {
+                        list.push(match el {
+                            serde_yml::Value::String(s) => s.clone(),
+                            other => {
+                                return Err(format!(
+                                    "expect StringList, but got element of other type: {other:?}"
+                                ));
+                            }
+                        });
+                    }
+                    Ok(ConfigValue::StringList(list))
                 }
                 _ => Err(format!("expected value of type {self}, but got {val:?}",)),
             }
@@ -137,6 +152,7 @@ pub mod yaml_parsers {
             let s = match self {
                 YamlValueExtractor::TimeDurationSecs => "TimeDurationSeconds(float)",
                 YamlValueExtractor::String => "String",
+                YamlValueExtractor::StringList => "List<String>",
             };
             f.write_str(s)
         }
@@ -272,6 +288,7 @@ pub mod yaml_parsers {
                 ("comm", (YamlValueExtractor::String, true)),
                 ("mode", (YamlValueExtractor::String, true)),
                 ("hint", (YamlValueExtractor::String, false)),
+                ("args", (YamlValueExtractor::StringList, true)),
             ])
             .parse(args)?;
 
@@ -287,12 +304,23 @@ pub mod yaml_parsers {
                 "bgwait" => SpawnMode::BackgroundWait,
                 other => return Err(format!("bad launch mode: {other}")),
             };
-            let hint = values.get("hint").map(|h| match h {
-                ConfigValue::String(hint) => hint.clone(),
-                _ => unreachable!(),
-            }).unwrap_or_default();
+            let ConfigValue::StringList(args) = values["args"].clone() else {
+                unreachable!()
+            };
+            let hint = values
+                .get("hint")
+                .map(|h| match h {
+                    ConfigValue::String(hint) => hint.clone(),
+                    _ => unreachable!(),
+                })
+                .unwrap_or_default();
 
-            Ok(ConfigValue::LaunchArgs { comm, mode, args: vec![], hint })
+            Ok(ConfigValue::LaunchArgs {
+                comm,
+                mode,
+                args,
+                hint,
+            })
         }
     }
 

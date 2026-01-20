@@ -57,7 +57,7 @@ impl IniLike {
 #[derive(Clone, Debug)]
 pub enum ConfigValue {
     String(String),
-    T2String((String, String)),
+    StringList(Vec<String>),
     PollArgs {
         pattern: String,
         hint: Option<String>,

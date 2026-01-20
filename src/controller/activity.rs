@@ -398,8 +398,8 @@ pub mod default_activities {
             }
 
             match conf.value {
-                Some(ConfigValue::T2String((pattern, hint))) => {
-                    Ok(Box::new(Poller::create(&pattern, Some(hint))))
+                Some(ConfigValue::PollArgs { pattern, hint }) => {
+                    Ok(Box::new(Poller::create(&pattern, hint)))
                 }
                 None => Err(format!(
                     "'{}' poller expects configuration but got none",

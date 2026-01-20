@@ -22,12 +22,21 @@ use crate::common::{
 pub trait Connection {
     fn send(&mut self, req: Request) -> Result<()>;
     fn recv(&mut self) -> Result<Response>;
-    fn close(self);
+    fn close(&mut self);
 }
 
 impl std::fmt::Debug for dyn Connection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("Connection {:?}", &self as *const _))
+    }
+}
+
+pub fn stop_all(conn: &mut dyn Connection) -> Result<()> {
+    conn.send(Request::StopAll)?;
+    match conn.recv() {
+        Ok(Response::StopAll(res)) => res,
+        Err(e) => Err(e),
+        other => unreachable!("{other:?}"),
     }
 }
 
@@ -38,6 +47,10 @@ pub fn collect_data(conn: &mut dyn Connection) -> Result<Vec<u8>> {
         Err(e) => Err(e),
         other => unreachable!("{other:?}"),
     }
+}
+
+pub fn end(conn: &mut dyn Connection) -> Result<()> {
+    conn.send(Request::End)
 }
 
 pub mod tcpmsgpack {
@@ -113,7 +126,7 @@ pub mod tcpmsgpack {
                 .map_err(|e| format!("failed to parse msgpack::Request message: {e}"))
         }
 
-        fn close(self) {
+        fn close(&mut self) {
             self.conn
                 .shutdown(Shutdown::Both)
                 .expect("failed to close the connection");
